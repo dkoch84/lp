@@ -1,9 +1,10 @@
 import sys
 import argparse
 import yaml
-from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog, QLabel
+import os
+from PyQt6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog, QLabel, QProgressBar
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QTimer
 from player_backend import PlayerBackend
 
 class AspectRatioPixmapLabel(QLabel):
@@ -36,6 +37,10 @@ class MusicPlayerUI(QWidget):
         self.codec_label = QLabel(self)
         self.bitrate_label = QLabel(self)
         self.sampling_rate_label = QLabel(self)
+        self.progress_bar = QProgressBar(self)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_progress_bar)
+        self.timer.start(1000)  # update every second
         self.init_ui()
 
     def init_ui(self):
@@ -58,6 +63,7 @@ class MusicPlayerUI(QWidget):
 
         layout = QVBoxLayout()
         layout.addWidget(self.album_art_label, 1)
+        layout.addWidget(self.progress_bar)
         layout.addLayout(metadata_layout, 0)
         layout.addWidget(play_button, 0)
         layout.addWidget(stop_button, 0)
@@ -65,16 +71,31 @@ class MusicPlayerUI(QWidget):
         self.setLayout(layout)
 
     def open_file_and_play_music(self):
-      file_dialog = QFileDialog.getOpenFileName(self, 'Open file', self.music_library_path)
-      album_art_path, metadata = self.player_backend.play_music(file_dialog[0])
-      pixmap = QPixmap(album_art_path)
-      self.album_art_label.setPixmap(pixmap)
-      self.title_label.setText(f"Title: {metadata['title']}")
-      self.artist_label.setText(f"Artist: {metadata['artist']}")
-      self.album_label.setText(f"Album: {metadata['album']}")
-      # Convert bitrate to kbit/s and sampling rate to kHz before setting the text
-      self.bitrate_label.setText(f"Bitrate: {metadata['bitrate'] / 1000} kbit/s")
-      self.sampling_rate_label.setText(f"Sampling Rate: {metadata['sampling_rate'] / 1000} kHz")
+        folder_dialog = QFileDialog.getExistingDirectory(self, 'Open folder', self.music_library_path)
+        music_files = [os.path.join(folder_dialog, f) for f in os.listdir(folder_dialog) if f.endswith(('.mp3', '.flac'))]
+        self.player_backend.play_music(music_files)
+        self.update_metadata()
+
+    def update_metadata(self):
+        album_art_path, metadata = self.player_backend.get_current_song_info()
+        if metadata is None:
+          print("No metadata available.")
+          return
+        pixmap = QPixmap(album_art_path)
+        self.album_art_label.setPixmap(pixmap)
+        self.title_label.setText(f"Title: {metadata['title']}")
+        self.artist_label.setText(f"Artist: {metadata['artist']}")
+        self.album_label.setText(f"Album: {metadata['album']}")
+        self.date_label.setText(f"Date: {metadata['date']}")
+        self.bitrate_label.setText(f"Bitrate: {metadata['bitrate'] / 1000} kbit/s")
+        self.sampling_rate_label.setText(f"Sampling Rate: {metadata['sampling_rate'] / 1000} kHz")
+
+    def update_progress_bar(self):
+        current_time = self.player_backend.get_current_time()
+        total_time = self.player_backend.get_total_time()
+        if total_time > 0:
+            progress = (current_time / total_time) * 100
+            self.progress_bar.setValue(int(progress))
 
 def main():
     # Parse command line arguments

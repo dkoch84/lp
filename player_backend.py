@@ -8,12 +8,29 @@ from mutagen.mp3 import MP3
 class PlayerBackend:
     def __init__(self):
         self.player = vlc.MediaPlayer()
+        self.player.event_manager().event_attach(vlc.EventType.MediaPlayerEndReached, self.next_song)
+        self.album = []
+        self.current_song_index = 0
 
-    def play_music(self, file_path):
-        if file_path:
-            self.player.set_media(vlc.Media(file_path))
+    def play_music(self, music_files):
+        if not music_files:
+          print("No music files provided.")
+          return
+        self.album = music_files
+        self.current_song_index = 0
+        self.player.set_media(vlc.Media(self.album[self.current_song_index]))
+        self.player.play()
+
+    def next_song(self, event):
+        if self.current_song_index + 1 < len(self.album):
+            self.current_song_index += 1
+            self.player.set_media(vlc.Media(self.album[self.current_song_index]))
             self.player.play()
-            return self.find_album_art(file_path), self.get_song_metadata(file_path)
+
+    def get_current_song_info(self):
+        if self.current_song_index < len(self.album):
+            return self.find_album_art(self.album[self.current_song_index]), self.get_song_metadata(self.album[self.current_song_index])
+        return None, None
 
     def stop_music(self):
         self.player.stop()
@@ -61,3 +78,9 @@ class PlayerBackend:
             'bitrate': bitrate,
             'sampling_rate': sampling_rate,
         }
+
+    def get_current_time(self):
+        return self.player.get_time() / 1000  # get_time returns milliseconds
+
+    def get_total_time(self):
+        return self.player.get_length() / 1000  # get_length returns milliseconds
