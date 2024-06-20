@@ -65,17 +65,16 @@ class MusicPlayerUI(QWidget):
         self.setLayout(layout)
 
     def open_file_and_play_music(self):
-        file_dialog = QFileDialog.getOpenFileName(self, 'Open file', self.music_library_path)
-        album_art_path, metadata = self.player_backend.play_music(file_dialog[0])
-        pixmap = QPixmap(album_art_path)
-        self.album_art_label.setPixmap(pixmap)
-        self.title_label.setText(f"Title: {metadata['title']}")
-        self.artist_label.setText(f"Artist: {metadata['artist']}")
-        self.album_label.setText(f"Album: {metadata['album']}")
-        self.date_label.setText(f"Date: {metadata['date']}")
-        self.codec_label.setText(f"Codec: {metadata['codec']}")
-        self.bitrate_label.setText(f"Bitrate: {metadata['bitrate']}")
-        self.sampling_rate_label.setText(f"Sampling Rate: {metadata['sampling_rate']}")
+      file_dialog = QFileDialog.getOpenFileName(self, 'Open file', self.music_library_path)
+      album_art_path, metadata = self.player_backend.play_music(file_dialog[0])
+      pixmap = QPixmap(album_art_path)
+      self.album_art_label.setPixmap(pixmap)
+      self.title_label.setText(f"Title: {metadata['title']}")
+      self.artist_label.setText(f"Artist: {metadata['artist']}")
+      self.album_label.setText(f"Album: {metadata['album']}")
+      # Convert bitrate to kbit/s and sampling rate to kHz before setting the text
+      self.bitrate_label.setText(f"Bitrate: {metadata['bitrate'] / 1000} kbit/s")
+      self.sampling_rate_label.setText(f"Sampling Rate: {metadata['sampling_rate'] / 1000} kHz")
 
 def main():
     # Parse command line arguments
