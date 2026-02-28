@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>lp — vinyl styles</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #111;
+      color: #eee;
+      min-height: 100dvh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      border-bottom: 1px solid #222;
+      position: sticky;
+      top: 0;
+      background: #111;
+      z-index: 10;
+    }
+
+    header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.05em; }
+    .header-spacer { flex: 1; }
+    #current-style { color: #888; font-size: 0.85rem; }
+
+    #back-btn {
+      background: none;
+      border: none;
+      color: #eee;
+      font-size: 1.4rem;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+
+    .section { padding: 0 20px; }
+
+    .section h2 {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin: 24px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #222;
+    }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 16px;
+      padding-bottom: 8px;
+    }
+
+    .vinyl-item {
+      cursor: pointer;
+      text-align: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .vinyl-item:active { opacity: 0.8; }
+
+    .vinyl-thumb {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: #222;
+      overflow: hidden;
+      border: 3px solid transparent;
+      transition: border-color 0.15s;
+    }
+
+    .vinyl-item.active .vinyl-thumb {
+      border-color: #888;
+    }
+
+    .vinyl-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .vinyl-thumb-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #444;
+    }
+
+    .vinyl-label {
+      margin-top: 6px;
+      font-size: 0.75rem;
+      color: #aaa;
+      line-height: 1.3;
+    }
+
+    .vinyl-item.active .vinyl-label {
+      color: #fff;
+    }
+
+    .slider-section {
+      padding: 16px 20px;
+    }
+
+    .slider-section h2 {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #222;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: #888;
+    }
+
+    .slider-value {
+      color: #aaa;
+      font-size: 0.85rem;
+      min-width: 36px;
+      text-align: right;
+    }
+
+    .lastfm-section {
+      padding: 16px 20px;
+    }
+
+    .lastfm-section h2 {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #222;
+    }
+
+    .lastfm-status {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 12px;
+    }
+
+    .lastfm-status .username {
+      color: #eee;
+      font-weight: 500;
+    }
+
+    .lastfm-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 300px;
+    }
+
+    .lastfm-form input[type="text"],
+    .lastfm-form input[type="password"] {
+      background: #222;
+      border: 1px solid #333;
+      color: #eee;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+
+    .lastfm-form input::placeholder {
+      color: #555;
+    }
+
+    .lastfm-btn {
+      background: #333;
+      border: none;
+      color: #eee;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+
+    .lastfm-btn:active { background: #444; }
+    .lastfm-btn.danger { color: #c44; }
+
+    .lastfm-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .lastfm-toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      background: #333;
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: none;
+      padding: 0;
+    }
+
+    .lastfm-toggle.on { background: #4a4; }
+
+    .lastfm-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      background: #eee;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .lastfm-toggle.on::after { transform: translateX(18px); }
+
+    .lastfm-error {
+      color: #c44;
+      font-size: 0.8rem;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="back-btn" aria-label="Back">&larr;</button>
+    <h1>vinyl styles</h1>
+    <div class="header-spacer"></div>
+    <span id="current-style"></span>
+  </header>
+
+  <div id="gallery-container"></div>
+
+  <script>
+    const container = document.getElementById('gallery-container');
+    const currentStyleEl = document.getElementById('current-style');
+    let currentStyle = 'random';
+    let currentLabel = 'art';
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      if (!res.ok) throw new Error(`${res.status}`);
+      return res.json();
+    }
+
+    function previewUrl(id) {
+      // Strip prefix to get cache filename
+      if (id.startsWith('mandelbrot-')) {
+        const name = id.slice('mandelbrot-'.length);
+        return `/api/vinyl/preview/${name}`;
+      }
+      if (id.startsWith('nebula-')) {
+        const name = id.slice('nebula-'.length);
+        return `/api/vinyl/preview/${name}`;
+      }
+      return null;
+    }
+
+    // CSS colors matching VINYL_COLORS base values from display.py
+    const vinylColorMap = {
+      'color-red':        'rgb(130,35,35)',
+      'color-navy':       'rgb(40,50,120)',
+      'color-forest':     'rgb(35,100,50)',
+      'color-plum':       'rgb(110,40,95)',
+      'color-chocolate':  'rgb(120,65,30)',
+      'color-slate':      'rgb(80,90,105)',
+      'color-amber':      'rgb(140,95,25)',
+      'color-teal':       'rgb(30,110,110)',
+      'color-burgundy':   'rgb(115,30,55)',
+      'color-olive':      'rgb(90,100,35)',
+      'color-cream':      'rgb(200,190,160)',
+    };
+
+    // CSS colors for label presets
+    const labelColorMap = {
+      'label-brown':  'rgb(140,90,60)',
+      'label-black':  'rgb(30,30,30)',
+      'label-white':  'rgb(230,230,225)',
+      'label-cream':  'rgb(210,200,170)',
+      'label-red':    'rgb(160,40,40)',
+      'label-orange': 'rgb(180,100,30)',
+      'label-yellow': 'rgb(200,185,50)',
+      'label-green':  'rgb(40,130,55)',
+      'label-blue':   'rgb(45,60,150)',
+      'label-purple': 'rgb(100,45,140)',
+    };
+
+    function placeholderFor(id) {
+      const icons = {
+        random: '🎲', black: '⚫', clear: '⚪', color: '🎨',
+        picture: '🖼', mandelbrot: '🌀', nebula: '🌌', art: '🖼',
+      };
+      return icons[id] || '●';
+    }
+
+    async function setLabel(id) {
+      currentLabel = id;
+      await api('/api/settings/label', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({label: id}),
+      });
+      document.querySelectorAll('.label-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.id === id);
+      });
+    }
+
+    async function setBrightness(val) {
+      await api('/api/settings/brightness', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({brightness: val}),
+      });
+    }
+
+    function renderLabelItem(opt) {
+      const div = document.createElement('div');
+      div.className = 'vinyl-item label-item' + (opt.id === currentLabel ? ' active' : '');
+      div.dataset.id = opt.id;
+
+      const thumb = document.createElement('div');
+      thumb.className = 'vinyl-thumb';
+
+      const cssColor = labelColorMap[opt.id];
+      if (cssColor) {
+        thumb.style.background = cssColor;
+      } else {
+        const ph = document.createElement('div');
+        ph.className = 'vinyl-thumb-placeholder';
+        ph.textContent = placeholderFor(opt.id);
+        thumb.appendChild(ph);
+      }
+
+      const label = document.createElement('div');
+      label.className = 'vinyl-label';
+      label.textContent = opt.label;
+
+      div.appendChild(thumb);
+      div.appendChild(label);
+      div.addEventListener('click', () => setLabel(opt.id));
+      return div;
+    }
+
+    async function setStyle(id) {
+      currentStyle = id;
+      await api('/api/settings/vinyl', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({style: id}),
+      });
+      currentStyleEl.textContent = id;
+      document.querySelectorAll('.vinyl-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.id === id);
+      });
+    }
+
+    function renderItem(opt) {
+      const div = document.createElement('div');
+      div.className = 'vinyl-item' + (opt.id === currentStyle ? ' active' : '');
+      div.dataset.id = opt.id;
+
+      const thumb = document.createElement('div');
+      thumb.className = 'vinyl-thumb';
+
+      const url = previewUrl(opt.id);
+      const cssColor = vinylColorMap[opt.id];
+      if (url) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = opt.label;
+        img.loading = 'lazy';
+        thumb.appendChild(img);
+      } else if (cssColor) {
+        thumb.style.background = cssColor;
+      } else {
+        const ph = document.createElement('div');
+        ph.className = 'vinyl-thumb-placeholder';
+        ph.textContent = placeholderFor(opt.id);
+        thumb.appendChild(ph);
+      }
+
+      const label = document.createElement('div');
+      label.className = 'vinyl-label';
+      label.textContent = opt.label;
+
+      div.appendChild(thumb);
+      div.appendChild(label);
+      div.addEventListener('click', () => setStyle(opt.id));
+      return div;
+    }
+
+    function renderLastfm(lfm) {
+      const section = document.createElement('div');
+      section.className = 'lastfm-section';
+      const h2 = document.createElement('h2');
+      h2.textContent = 'Last.fm';
+      section.appendChild(h2);
+
+      if (!lfm.configured) {
+        const msg = document.createElement('div');
+        msg.className = 'lastfm-status';
+        msg.textContent = 'Add api_key and api_secret to config.yml to enable scrobbling.';
+        section.appendChild(msg);
+        return section;
+      }
+
+      if (lfm.authenticated) {
+        const row = document.createElement('div');
+        row.className = 'lastfm-row';
+        const status = document.createElement('span');
+        status.className = 'lastfm-status';
+        status.innerHTML = 'Signed in as <span class="username">' +
+          lfm.username.replace(/</g, '&lt;') + '</span>';
+        row.appendChild(status);
+        section.appendChild(row);
+
+        // Enable/disable toggle
+        const toggleRow = document.createElement('div');
+        toggleRow.className = 'lastfm-row';
+        const toggle = document.createElement('button');
+        toggle.className = 'lastfm-toggle' + (lfm.enabled ? ' on' : '');
+        toggle.addEventListener('click', async () => {
+          const newVal = !toggle.classList.contains('on');
+          toggle.classList.toggle('on', newVal);
+          await api('/api/settings/lastfm/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: newVal}),
+          });
+        });
+        const toggleLabel = document.createElement('span');
+        toggleLabel.className = 'lastfm-status';
+        toggleLabel.textContent = 'Scrobbling';
+        toggleRow.appendChild(toggle);
+        toggleRow.appendChild(toggleLabel);
+        section.appendChild(toggleRow);
+
+        // Logout
+        const logout = document.createElement('button');
+        logout.className = 'lastfm-btn danger';
+        logout.textContent = 'Sign out';
+        logout.addEventListener('click', async () => {
+          await api('/api/settings/lastfm/logout', {method: 'POST'});
+          location.reload();
+        });
+        section.appendChild(logout);
+      } else {
+        const form = document.createElement('div');
+        form.className = 'lastfm-form';
+        const userInput = document.createElement('input');
+        userInput.type = 'text';
+        userInput.placeholder = 'Last.fm username';
+        const passInput = document.createElement('input');
+        passInput.type = 'password';
+        passInput.placeholder = 'Password';
+        const btn = document.createElement('button');
+        btn.className = 'lastfm-btn';
+        btn.textContent = 'Sign in';
+        const errEl = document.createElement('div');
+        errEl.className = 'lastfm-error';
+        btn.addEventListener('click', async () => {
+          errEl.textContent = '';
+          btn.disabled = true;
+          btn.textContent = 'Signing in...';
+          try {
+            await api('/api/settings/lastfm/auth', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({username: userInput.value, password: passInput.value}),
+            });
+            location.reload();
+          } catch (e) {
+            errEl.textContent = 'Authentication failed';
+            btn.disabled = false;
+            btn.textContent = 'Sign in';
+          }
+        });
+        form.appendChild(userInput);
+        form.appendChild(passInput);
+        form.appendChild(btn);
+        form.appendChild(errEl);
+        section.appendChild(form);
+      }
+      return section;
+    }
+
+    async function init() {
+      const [styleRes, optRes, labelRes, labelOptRes, brightRes, lastfmRes] = await Promise.all([
+        api('/api/settings/vinyl'),
+        api('/api/settings/vinyl/options'),
+        api('/api/settings/label'),
+        api('/api/settings/label/options'),
+        api('/api/settings/brightness'),
+        api('/api/settings/lastfm'),
+      ]);
+      currentStyle = styleRes.style;
+      currentStyleEl.textContent = currentStyle;
+      currentLabel = labelRes.label;
+
+      // Last.fm
+      container.appendChild(renderLastfm(lastfmRes));
+
+      // Brightness slider
+      const sliderSection = document.createElement('div');
+      sliderSection.className = 'slider-section';
+      const sliderH2 = document.createElement('h2');
+      sliderH2.textContent = 'Brightness';
+      sliderSection.appendChild(sliderH2);
+      const sliderRow = document.createElement('div');
+      sliderRow.className = 'slider-row';
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '0';
+      slider.max = '100';
+      slider.value = String(brightRes.brightness);
+      const valSpan = document.createElement('span');
+      valSpan.className = 'slider-value';
+      valSpan.textContent = brightRes.brightness + '%';
+      slider.addEventListener('input', () => {
+        valSpan.textContent = slider.value + '%';
+      });
+      slider.addEventListener('change', () => {
+        setBrightness(parseInt(slider.value));
+      });
+      sliderRow.appendChild(slider);
+      sliderRow.appendChild(valSpan);
+      sliderSection.appendChild(sliderRow);
+      container.appendChild(sliderSection);
+
+      // Label options
+      const labelSection = document.createElement('div');
+      labelSection.className = 'section';
+      const labelH2 = document.createElement('h2');
+      labelH2.textContent = 'Center Label';
+      labelSection.appendChild(labelH2);
+      const labelGallery = document.createElement('div');
+      labelGallery.className = 'gallery';
+      for (const opt of labelOptRes.options) {
+        labelGallery.appendChild(renderLabelItem(opt));
+      }
+      labelSection.appendChild(labelGallery);
+      container.appendChild(labelSection);
+
+      // Vinyl style options
+      const options = optRes.options;
+
+      const categories = {
+        basic: {title: 'Basic', items: []},
+        color: {title: 'Colored', items: []},
+        mandelbrot: {title: 'Mandelbrot', items: []},
+        nebula: {title: 'Nebula', items: []},
+      };
+
+      for (const opt of options) {
+        const cat = categories[opt.category] || categories.basic;
+        cat.items.push(opt);
+      }
+
+      for (const [key, cat] of Object.entries(categories)) {
+        if (cat.items.length === 0) continue;
+        const section = document.createElement('div');
+        section.className = 'section';
+        const h2 = document.createElement('h2');
+        h2.textContent = cat.title;
+        section.appendChild(h2);
+
+        const gallery = document.createElement('div');
+        gallery.className = 'gallery';
+        for (const opt of cat.items) {
+          gallery.appendChild(renderItem(opt));
+        }
+        section.appendChild(gallery);
+        container.appendChild(section);
+      }
+    }
+
+    document.getElementById('back-btn').addEventListener('click', () => {
+      window.location.href = '/';
+    });
+
+    init();
+  </script>
+</body>
+</html>

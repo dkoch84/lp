@@ -1,0 +1,15 @@
+music_library_path: /path/to/music
+
+display:
+  fullscreen: false
+  width: 1920
+  height: 1080
+  show_metadata: true
+
+api:
+  host: 0.0.0.0
+  port: 8000
+
+lastfm:
+  api_key: ""
+  api_secret: ""

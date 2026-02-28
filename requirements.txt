@@ -1,4 +1,7 @@
-PyQt6==6.2.2
 python-vlc
 pyyaml
 mutagen
+fastapi
+uvicorn[standard]
+pygame-ce
+pylast
