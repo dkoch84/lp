@@ -47,6 +47,25 @@ main {
 
 .hidden { display: none !important; }
 
+#search {
+  display: block;
+  width: calc(100% - 40px);
+  margin: 16px 20px 0;
+  padding: 10px 14px;
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+#search:focus {
+  border-color: #555;
+}
+
+#search.hidden { display: none !important; }
+
 /* Shared grid for both artists and albums */
 .tile-grid {
   display: grid;

@@ -12,7 +12,8 @@ AUDIO_EXTENSIONS = ('.mp3', '.flac')
 
 class PlayerBackend:
     def __init__(self):
-        self.player = vlc.MediaPlayer()
+        self._instance = vlc.Instance('--aout=alsa')
+        self.player = self._instance.media_player_new()
         self._lock = threading.Lock()
         self._callbacks = {}
         self._media_ended = False
@@ -48,15 +49,18 @@ class PlayerBackend:
             threading.Event().wait(0.1)
 
     def _advance_track(self):
+        event = None
         with self._lock:
             if self.current_song_index + 1 < len(self.album):
                 self.current_song_index += 1
-                self.player.set_media(vlc.Media(self.album[self.current_song_index]))
+                self.player.set_media(self._instance.media_new(self.album[self.current_song_index]))
                 self.player.play()
-                self._fire('track_change')
+                event = 'track_change'
             else:
                 self._playing = False
-                self._fire('album_end')
+                event = 'album_end'
+        if event:
+            self._fire(event)
 
     def on(self, event, callback):
         self._callbacks.setdefault(event, []).append(callback)
@@ -98,7 +102,7 @@ class PlayerBackend:
             self.album_duration = cumulative
             self._playing = True
 
-        self.player.set_media(vlc.Media(files[0]))
+        self.player.set_media(self._instance.media_new(files[0]))
         self.player.play()
         self._fire('play_start')
 

@@ -631,6 +631,7 @@ class Display:
         self.fullscreen = self.config.get('fullscreen', False)
         self.width = self.config.get('width', 1280)
         self.height = self.config.get('height', 720)
+        self.url = self.config.get('url', 'https://lp.example.com')
 
         self._dirty = True
         self._art_surface = None
@@ -654,6 +655,7 @@ class Display:
 
     def run(self):
         pygame.init()
+        pygame.mixer.quit()  # Release audio device for VLC
         pygame.display.set_caption('lp')
 
         flags = 0
@@ -949,8 +951,7 @@ class Display:
         rect = text.get_rect(center=(self.width // 2, self.height // 2 - int(self.height * 0.05)))
         self.screen.blit(text, rect)
 
-        url = f"http://localhost:{self.port}"
-        url_surf = self._font_small.render(url, True, DIM_TEXT)
+        url_surf = self._font_small.render(self.url, True, DIM_TEXT)
         url_rect = url_surf.get_rect(center=(self.width // 2, self.height // 2 + int(self.height * 0.08)))
         self.screen.blit(url_surf, url_rect)
 

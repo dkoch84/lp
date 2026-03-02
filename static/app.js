@@ -9,6 +9,7 @@ const npTrack = $('#np-track');
 const npArtistAlbum = $('#np-artist-album');
 const npStop = $('#np-stop');
 const vinylBtn = $('#vinyl-btn');
+const searchInput = $('#search');
 
 let currentArtist = null;
 let statusInterval = null;
@@ -29,12 +30,24 @@ vinylBtn.addEventListener('click', () => {
   window.location.href = '/vinyl.html';
 });
 
+// --- Search ---
+
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase();
+  for (const tile of artistGrid.children) {
+    const name = tile.dataset.name || '';
+    tile.style.display = name.includes(q) ? '' : 'none';
+  }
+});
+
 // --- Artist grid ---
 
 async function showArtists() {
   currentArtist = null;
   albumGrid.classList.add('hidden');
   artistGrid.classList.remove('hidden');
+  searchInput.classList.remove('hidden');
+  searchInput.value = '';
   backBtn.classList.add('hidden');
   headerTitle.textContent = 'lp';
 
@@ -43,6 +56,7 @@ async function showArtists() {
   for (const a of artists) {
     const tile = document.createElement('div');
     tile.className = 'artist-tile';
+    tile.dataset.name = a.name.toLowerCase();
 
     let collageHtml;
     if (a.covers.length === 0) {
@@ -71,6 +85,7 @@ async function showArtists() {
 async function showAlbums(artistName) {
   currentArtist = artistName;
   artistGrid.classList.add('hidden');
+  searchInput.classList.add('hidden');
   albumGrid.classList.remove('hidden');
   backBtn.classList.remove('hidden');
   headerTitle.textContent = artistName;
