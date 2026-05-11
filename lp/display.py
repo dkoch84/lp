@@ -711,6 +711,7 @@ class Display:
 
         try:
             self.renderer = sdl2_video.Renderer(self.window, accelerated=1, vsync=True)
+            print(f'display: GPU renderer at {self.width}x{self.height} (SS={RECORD_SUPERSAMPLE})')
         except pygame.error as e:
             print(f'WARN: GPU renderer unavailable ({e}); falling back to software')
             self.renderer = sdl2_video.Renderer(self.window, accelerated=0)
@@ -779,7 +780,7 @@ class Display:
     def _get_circular_art(self, art_path, radius):
         """Get album art masked into a circle at the given radius."""
         try:
-            img = pygame.image.load(art_path).convert_alpha()
+            img = pygame.image.load(art_path)
             d = radius * 2
             scaled = pygame.transform.smoothscale(img, (d, d))
             circle_mask = pygame.Surface((d, d), pygame.SRCALPHA)
@@ -972,7 +973,7 @@ class Display:
         cache_path = os.path.join(CACHE_DIR, f'{name}-{color}.png')
 
         if os.path.isfile(cache_path):
-            cached = pygame.image.load(cache_path).convert_alpha()
+            cached = pygame.image.load(cache_path)
             fractal = pygame.transform.smoothscale(cached, (d, d))
         else:
             fractal = _render_mandelbrot_surface(variant, size)
@@ -992,7 +993,7 @@ class Display:
         cache_path = os.path.join(NEBULA_CACHE_DIR, f'{name}.png')
 
         if os.path.isfile(cache_path):
-            cached = pygame.image.load(cache_path).convert_alpha()
+            cached = pygame.image.load(cache_path)
             nebula = pygame.transform.smoothscale(cached, (d, d))
         else:
             nebula = _render_nebula_surface(variant, size)
