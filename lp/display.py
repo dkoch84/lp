@@ -64,6 +64,46 @@ VINYL_COLORS = {
     'midnight':     (75, 60, 210),
 }
 
+# Per-variant groove + track-mark appearance — (groove_rgba, track_rgba).
+# Dark body → light groove (highlight), light body → dark groove (shadow).
+# Track alpha is roughly 2× groove alpha so boundaries are visible but not huge.
+# Tune these to taste per vinyl style.
+VINYL_GROOVE_COLORS = {
+    # Light bodies — dark shadow haze (subtle)
+    'cream':      ((0, 0, 0, 7),        (0, 0, 0, 28)),
+    'mono':       ((0, 0, 0, 7),        (0, 0, 0, 28)),
+    'fire':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'gold':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'ocean':      ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'emerald':    ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'lavender':   ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'purple':     ((0, 0, 0, 10),       (0, 0, 0, 40)),
+    'rose':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'copper':     ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'rust':       ((0, 0, 0, 10),       (0, 0, 0, 40)),
+    # Dark bodies — light additive shine
+    'red':        ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'navy':       ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'forest':     ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'plum':       ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'chocolate':  ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'slate':      ((255, 255, 255, 7),  (255, 255, 255, 36)),
+    'amber':      ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'teal':       ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'burgundy':   ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'olive':      ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'midnight':   ((255, 255, 255, 8),  (255, 255, 255, 45)),
+}
+
+# Plain black vinyl: light grooves (light catching the spiral) on a dark body.
+BLACK_GROOVE_COLORS = ((90, 90, 90, 80), (110, 110, 110, 130))
+
+# Transparent / clear vinyl.
+CLEAR_GROOVE_COLORS = ((255, 255, 255, 10), (255, 255, 255, 22))
+
+# Picture disc (uses album art as the entire face).
+PICTURE_GROOVE_COLORS = ((0, 0, 0, 12), (0, 0, 0, 26))
+
 # Mandelbrot color schemes: (interior, r_params, g_params, b_params, groove, track_mark)
 # Each channel: (base, amplitude, frequency, phase)
 MANDELBROT_COLORS = {
@@ -79,6 +119,22 @@ MANDELBROT_COLORS = {
     'rust':      ((30, 8, 5),    (70, 140, 8.0, 0.0),  (25, 80, 6.0, 1.0), (10, 45, 5.0, 2.5),      (50, 25, 15),  (70, 40, 25)),
     'lavender':  ((18, 10, 25),  (50, 130, 10.0, 1.0), (30, 90, 7.0, 2.5), (60, 160, 9.0, 0.0),     (35, 25, 50),  (50, 35, 70)),
     'midnight':  ((5, 5, 20),    (15, 60, 7.0, 2.0),  (10, 50, 6.0, 1.0), (40, 170, 10.0, 0.0),     (15, 15, 40),  (25, 25, 55)),
+}
+
+# Per-mandelbrot-color-scheme groove + track. Keyed on the color name.
+MANDELBROT_GROOVE_COLORS = {
+    'purple':    ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'fire':      ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'ocean':     ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'emerald':   ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'gold':      ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'mono':      ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'copper':    ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'teal':      ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'rose':      ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'rust':      ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'lavender':  ((0, 0, 0, 32), (0, 0, 0, 60)),
+    'midnight':  ((255, 255, 255, 22), (255, 255, 255, 45)),
 }
 
 # Mandelbrot zoom locations: (cx, cy, zoom, max_iter, name)
@@ -434,6 +490,29 @@ NEBULA_VARIANTS = [
     (67, _nebula_molten,         'molten',         1.8, 6, 7),
     (82, _nebula_lava_lamp,      'lava-lamp',      1.8, 6, 7),
 ]
+
+# Per-nebula-variant groove + track. Keyed on the variant name.
+NEBULA_GROOVE_COLORS = {
+    'purple-fire':    ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'ocean-emerald':  ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'crimson-gold':   ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'electric':       ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'emerald-purple': ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'deep-emerald':   ((0, 0, 0, 28), (0, 0, 0, 52)),
+    'cream-green':    ((0, 0, 0, 22), (0, 0, 0, 44)),
+    'bone':           ((0, 0, 0, 18), (0, 0, 0, 36)),
+    'cream-rose':     ((0, 0, 0, 22), (0, 0, 0, 44)),
+    'marble':         ((0, 0, 0, 22), (0, 0, 0, 44)),
+    'galaxy':         ((255, 255, 255, 22), (255, 255, 255, 45)),
+    'galaxy-warm':    ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'galaxy-cold':    ((255, 255, 255, 22), (255, 255, 255, 45)),
+    'oil-spill':      ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'absinthe':       ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'coral-reef':     ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'bruise':         ((255, 255, 255, 22), (255, 255, 255, 45)),
+    'molten':         ((0, 0, 0, 30), (0, 0, 0, 56)),
+    'lava-lamp':      ((0, 0, 0, 30), (0, 0, 0, 56)),
+}
 
 
 def _render_nebula_surface(variant, size):
@@ -928,11 +1007,12 @@ class Display:
         return surf
 
     def _build_grooves_overlay(self, size, style, boundaries, album_dur):
-        """Build the spiral grooves + track marks as a transparent overlay.
+        """Build the music-zone overlay with track-boundary gaps.
 
-        Built at display resolution (no supersample) so the GPU never has to
-        downscale it — that's what was producing the moiré on the dense groove
-        pattern. Drawn on top of the rotating record body with the same rotation.
+        Returns (surface, blend_mode) where blend_mode is 'blend' (normal alpha)
+        for a darkening haze on light vinyls, or 'add' for an additive shine on
+        patterned and dark vinyls. Shine renders consistently regardless of
+        whatever the body texture is underneath — additive light always brightens.
         """
         d = size * 2
         surf = pygame.Surface((d, d), pygame.SRCALPHA)
@@ -942,29 +1022,114 @@ class Display:
             style = {'type': 'black'}
         style_type = style.get('type', 'black')
 
+        overlay_c = None
+        blend_mode = 'blend'
+
         if style_type == 'clear':
-            groove_c, track_c = (255, 255, 255, 10), (255, 255, 255, 22)
+            overlay_c = CLEAR_GROOVE_COLORS[0]
         elif style_type == 'color':
-            groove_c, track_c = (0, 0, 0, 14), (0, 0, 0, 28)
-        elif style_type in ('mandelbrot', 'nebula'):
-            groove_c, track_c = (0, 0, 0, 14), (0, 0, 0, 30)
-        elif style_type == 'picture':
-            groove_c, track_c = (0, 0, 0, 12), (0, 0, 0, 25)
-        else:  # black
-            groove_c, track_c = VINYL_BLACK[1], VINYL_BLACK[2]
+            overlay_c = VINYL_GROOVE_COLORS.get(
+                style.get('color', ''), ((0, 0, 0, 28), None))[0]
+            # Dark bodies get a light shine (additive); light bodies get a
+            # dark haze (normal alpha blend).
+            if overlay_c and overlay_c[0] > 128:  # light overlay color
+                blend_mode = 'add'
+        elif style_type == 'black':
+            # Darker bands in the music zone — grooves cast deeper shadows
+            # than the smooth lead-in flats. Normal alpha blend.
+            overlay_c = (0, 0, 0, 25)
+        elif style_type in ('mandelbrot', 'nebula', 'picture'):
+            overlay_c = (255, 255, 255, 8)
+            blend_mode = 'add'
 
-        self._draw_grooves(surf, size, center, groove_c, ss_factor=1,
-                           boundaries=boundaries, album_dur=album_dur, gap_half_width=2)
-        self._draw_track_marks(surf, size, center, track_c, boundaries, album_dur, ss_factor=1)
+        if overlay_c is not None:
+            self._draw_music_zones(surf, size, center, overlay_c,
+                                   boundaries=boundaries, album_dur=album_dur,
+                                   gap_half_width=2)
 
-        # Match the body's brightness dim so groove/body contrast stays constant.
         brightness = self.player.vinyl_brightness
         if brightness < 100:
             arr = pygame.surfarray.pixels_alpha(surf)
             arr[:] = (arr.astype(np.float32) * brightness / 100).astype(np.uint8)
             del arr
 
-        return surf
+        return surf, blend_mode
+
+    @staticmethod
+    def _draw_specular_highlight(surf, size, center, color, highlight_angle=-np.pi * 0.35):
+        """Render a single angular specular highlight — a soft bright crescent
+        on one side of the disc, suggesting overhead light reflection.
+        """
+        d = size * 2
+        cx = d // 2
+        cy = d // 2
+
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+        theta = np.arctan2(dy, dx)
+
+        # Soft-edged disc mask.
+        in_disc = np.clip(size - r + 0.5, 0.0, 1.0)
+
+        # Angular intensity: smooth crescent peaking at highlight_angle.
+        phase = np.cos(theta - highlight_angle)
+        angular = np.maximum(phase, 0.0) ** 2
+
+        alpha_frac = in_disc * angular
+
+        alpha_val = color[3] if len(color) == 4 else 255
+        alpha = (alpha_frac * alpha_val).astype(np.uint8)
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = color[0]
+        rgba[..., 1] = color[1]
+        rgba[..., 2] = color[2]
+        rgba[..., 3] = alpha
+
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+
+    @staticmethod
+    def _draw_music_zones(surf, size, center, color, boundaries=None,
+                          album_dur=None, gap_half_width=2):
+        """Render the music-groove zones as a hazy color overlay with track gaps."""
+        d = size * 2
+        r_inner = size * INNER_GROOVE
+        r_outer = size * OUTER_GROOVE
+        cx = d // 2
+        cy = d // 2
+
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+
+        # Soft-edged annular band (1-px AA falloff at the band's inner/outer edge).
+        alpha_frac = np.clip(r - r_inner, 0.0, 1.0) * np.clip(r_outer - r, 0.0, 1.0)
+
+        # Carve gaps at each track boundary with 1-px soft edges.
+        if boundaries and album_dur and album_dur > 0:
+            groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
+            for b in boundaries[1:]:
+                frac = b / album_dur
+                r_boundary = size * OUTER_GROOVE - frac * groove_range
+                gap_factor = np.clip(np.abs(r - r_boundary) - (gap_half_width - 1),
+                                     0.0, 1.0)
+                alpha_frac = alpha_frac * gap_factor
+
+        alpha_val = color[3] if len(color) == 4 else 255
+        alpha = (alpha_frac * alpha_val).astype(np.uint8)
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = color[0]
+        rgba[..., 1] = color[1]
+        rgba[..., 2] = color[2]
+        rgba[..., 3] = alpha
+
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
 
 
     @staticmethod
@@ -1055,9 +1220,9 @@ class Display:
         dy = py - cy
         r = np.sqrt(dx * dx + dy * dy)
 
-        # 2-display-px stroke = ss_factor surface px (visibly heavier than the
-        # 1-px spiral groove — these are the wider "lead-in" rings).
-        ring_half_stroke = float(ss_factor)
+        # 2-display-px stroke (visibly heavier than the 1-px spiral, but
+        # not "huge"). half_stroke=0.5 + the +0.5 in the formula = 2px wide.
+        ring_half_stroke = ss_factor * 0.5
 
         alpha_frac = np.zeros_like(r)
         for b in boundaries[1:]:
@@ -1220,8 +1385,10 @@ class Display:
                        self.player.vinyl_brightness, record_size, tuple(boundaries))
         if grooves_key != self._grooves_texture_key:
             self._grooves_texture_key = grooves_key
-            grooves_surf = self._build_grooves_overlay(record_size, style, boundaries, album_dur)
+            grooves_surf, blend_mode = self._build_grooves_overlay(record_size, style, boundaries, album_dur)
             self._grooves_texture = sdl2_video.Texture.from_surface(self.renderer, grooves_surf)
+            # SDL_BLENDMODE_ADD = 2, _BLEND = 1
+            self._grooves_texture.blend_mode = 2 if blend_mode == 'add' else 1
 
         rec_cx = meta_x + meta_width // 2
         rec_cy = y + record_size + int(self.height * 0.01)
