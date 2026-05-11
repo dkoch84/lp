@@ -711,9 +711,9 @@ class Display:
 
         try:
             self.renderer = sdl2_video.Renderer(self.window, accelerated=1, vsync=True)
-            print(f'display: GPU renderer at {self.width}x{self.height} (SS={RECORD_SUPERSAMPLE})')
+            print(f'display: GPU renderer at {self.width}x{self.height} (SS={RECORD_SUPERSAMPLE})', flush=True)
         except pygame.error as e:
-            print(f'WARN: GPU renderer unavailable ({e}); falling back to software')
+            print(f'WARN: GPU renderer unavailable ({e}); falling back to software', flush=True)
             self.renderer = sdl2_video.Renderer(self.window, accelerated=0)
 
         self.clock = pygame.time.Clock()
@@ -782,11 +782,14 @@ class Display:
         try:
             img = pygame.image.load(art_path)
             d = radius * 2
+            # Force RGBA so BLEND_RGBA_MULT actually masks alpha (JPEG loads as RGB).
+            rgba = pygame.Surface((d, d), pygame.SRCALPHA)
             scaled = pygame.transform.smoothscale(img, (d, d))
+            rgba.blit(scaled, (0, 0))
             circle_mask = pygame.Surface((d, d), pygame.SRCALPHA)
             pygame.draw.circle(circle_mask, (255, 255, 255, 255), (radius, radius), radius)
-            scaled.blit(circle_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-            return scaled
+            rgba.blit(circle_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            return rgba
         except Exception:
             return None
 
@@ -930,14 +933,19 @@ class Display:
 
         Uses a dark semi-transparent overlay to subtly darken existing pixels,
         simulating how light catches real vinyl grooves.
+
+        Spacing and stroke scale with RECORD_SUPERSAMPLE so grooves stay visible
+        (not sub-pixel) after the GPU downscales the texture to the displayed size.
         """
         d = size * 2
         scale = 2
         hi_d = d * scale
         hi_c = (size * scale, size * scale)
         hi = pygame.Surface((hi_d, hi_d), pygame.SRCALPHA)
-        for r in range(int(size * scale * INNER_GROOVE), int(size * scale * OUTER_GROOVE), spacing * scale):
-            pygame.draw.circle(hi, color, hi_c, r, 1)
+        eff_spacing = spacing * RECORD_SUPERSAMPLE
+        stroke = RECORD_SUPERSAMPLE
+        for r in range(int(size * scale * INNER_GROOVE), int(size * scale * OUTER_GROOVE), eff_spacing * scale):
+            pygame.draw.circle(hi, color, hi_c, r, stroke)
         scaled = pygame.transform.smoothscale(hi, (d, d))
         surf.blit(scaled, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
 
@@ -950,17 +958,21 @@ class Display:
         self._draw_track_marks(surf, size, center, track_mark, boundaries, album_dur)
 
     def _draw_track_marks(self, surf, size, center, color, boundaries, album_dur):
-        """Draw anti-aliased track boundary rings — slightly more visible than grooves."""
+        """Draw anti-aliased track boundary rings — slightly more visible than grooves.
+
+        Stroke scales with RECORD_SUPERSAMPLE so track marks survive GPU downscale.
+        """
         if album_dur > 0 and boundaries:
             groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
             d = size * 2
             scale = 2
             hi = pygame.Surface((d * scale, d * scale), pygame.SRCALPHA)
             hi_c = (size * scale, size * scale)
+            stroke = RECORD_SUPERSAMPLE
             for b in boundaries[1:]:
                 frac = b / album_dur
                 r = int(size * scale * OUTER_GROOVE - frac * groove_range * scale)
-                pygame.draw.circle(hi, color, hi_c, r, 1)
+                pygame.draw.circle(hi, color, hi_c, r, stroke)
             scaled = pygame.transform.smoothscale(hi, (d, d))
             surf.blit(scaled, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
 
