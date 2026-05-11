@@ -117,10 +117,10 @@ NEBULA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'nebula')
 # Sized to cover a typical 1080p display at RECORD_SUPERSAMPLE=4 with minimal upscale.
 PRERENDER_SIZE = 800
 
-# Supersample factor for the record texture. The Surface is built at SS× the
-# displayed radius, uploaded once per album, and the GPU bilinear-downscales
-# it during draw — effectively free per-frame. Build cost grows ~SS².
-RECORD_SUPERSAMPLE = 4
+# Supersample factor for the record body. SS=2 plays nice with the GPU's
+# 4-tap bilinear filter (2:1 downscale is well-handled). The grooves overlay
+# is built separately at SS=1 (display resolution) to avoid moiré entirely.
+RECORD_SUPERSAMPLE = 2
 
 
 # --- Nebula noise helpers ---
@@ -684,6 +684,8 @@ class Display:
         self._current_album_path = None
         self._record_texture = None
         self._record_texture_key = None
+        self._grooves_texture = None
+        self._grooves_texture_key = None
         self._text_cache = {}
         self._needle_tex = None
 
@@ -858,7 +860,7 @@ class Display:
         return self._current_vinyl_style
 
     def _build_record(self, size, boundaries, album_dur, art_path=None, album_path=None):
-        """Build the vinyl record surface with track boundary marks and style."""
+        """Build the vinyl record body (no grooves/track marks — those go on the overlay)."""
         d = size * 2
         surf = pygame.Surface((d, d), pygame.SRCALPHA)
         center = (size, size)
@@ -873,29 +875,23 @@ class Display:
             pic = self._get_circular_art(art_path, size)
             if pic:
                 surf.blit(pic, (0, 0))
-                self._draw_grooves(surf, size, center, (0, 0, 0, 12))
-                self._draw_track_marks(surf, size, center, (0, 0, 0, 25), boundaries, album_dur)
             else:
-                self._draw_black_vinyl(surf, size, center, boundaries, album_dur)
+                self._draw_black_vinyl(surf, size, center)
         elif style_type == 'clear':
             pygame.draw.circle(surf, (255, 255, 255, 12), center, size)
-            self._draw_grooves(surf, size, center, (255, 255, 255, 10))
-            self._draw_track_marks(surf, size, center, (255, 255, 255, 22), boundaries, album_dur)
             pygame.draw.circle(surf, (255, 255, 255, 40), center, size, 2)
             pygame.draw.circle(surf, (255, 255, 255, 25), center, size - 1, 1)
         elif style_type == 'color':
             base = VINYL_COLORS.get(style.get('color'), VINYL_BLACK[0])
             pygame.draw.circle(surf, base, center, size)
-            self._draw_grooves(surf, size, center, (0, 0, 0, 14))
-            self._draw_track_marks(surf, size, center, (0, 0, 0, 28), boundaries, album_dur)
         elif style_type == 'mandelbrot':
             variant = style['variant']
-            self._draw_mandelbrot_vinyl(surf, size, center, variant, boundaries, album_dur)
+            self._draw_mandelbrot_vinyl(surf, size, center, variant)
         elif style_type == 'nebula':
             variant = style['variant']
-            self._draw_nebula_vinyl(surf, size, center, variant, boundaries, album_dur)
+            self._draw_nebula_vinyl(surf, size, center, variant)
         else:
-            self._draw_black_vinyl(surf, size, center, boundaries, album_dur)
+            self._draw_black_vinyl(surf, size, center)
 
         # Label — album art, colored, or fallback (skip for picture disc)
         if style_type != 'picture':
@@ -931,57 +927,145 @@ class Display:
 
         return surf
 
+    def _build_grooves_overlay(self, size, style, boundaries, album_dur):
+        """Build the spiral grooves + track marks as a transparent overlay.
 
-    @staticmethod
-    def _draw_grooves(surf, size, center, color, spacing=3):
-        """Draw anti-aliased groove circles via 2x supersampling.
-
-        Uses a dark semi-transparent overlay to subtly darken existing pixels,
-        simulating how light catches real vinyl grooves.
-
-        Spacing and stroke scale with RECORD_SUPERSAMPLE so grooves stay visible
-        (not sub-pixel) after the GPU downscales the texture to the displayed size.
+        Built at display resolution (no supersample) so the GPU never has to
+        downscale it — that's what was producing the moiré on the dense groove
+        pattern. Drawn on top of the rotating record body with the same rotation.
         """
         d = size * 2
-        scale = 2
-        hi_d = d * scale
-        hi_c = (size * scale, size * scale)
-        hi = pygame.Surface((hi_d, hi_d), pygame.SRCALPHA)
-        eff_spacing = spacing * RECORD_SUPERSAMPLE
-        stroke = RECORD_SUPERSAMPLE
-        for r in range(int(size * scale * INNER_GROOVE), int(size * scale * OUTER_GROOVE), eff_spacing * scale):
-            pygame.draw.circle(hi, color, hi_c, r, stroke)
-        scaled = pygame.transform.smoothscale(hi, (d, d))
-        surf.blit(scaled, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+        surf = pygame.Surface((d, d), pygame.SRCALPHA)
+        center = (size, size)
 
-    def _draw_black_vinyl(self, surf, size, center, boundaries, album_dur):
-        """Draw a plain black vinyl with grooves and track marks."""
-        base, groove, track_mark = VINYL_BLACK
-        pygame.draw.circle(surf, base, center, size)
-        # Black vinyl: groove is a lighter shade of the base (light catching edges)
-        self._draw_grooves(surf, size, center, groove)
-        self._draw_track_marks(surf, size, center, track_mark, boundaries, album_dur)
+        if not style:
+            style = {'type': 'black'}
+        style_type = style.get('type', 'black')
 
-    def _draw_track_marks(self, surf, size, center, color, boundaries, album_dur):
-        """Draw anti-aliased track boundary rings — slightly more visible than grooves.
+        if style_type == 'clear':
+            groove_c, track_c = (255, 255, 255, 10), (255, 255, 255, 22)
+        elif style_type == 'color':
+            groove_c, track_c = (0, 0, 0, 14), (0, 0, 0, 28)
+        elif style_type in ('mandelbrot', 'nebula'):
+            groove_c, track_c = (0, 0, 0, 14), (0, 0, 0, 30)
+        elif style_type == 'picture':
+            groove_c, track_c = (0, 0, 0, 12), (0, 0, 0, 25)
+        else:  # black
+            groove_c, track_c = VINYL_BLACK[1], VINYL_BLACK[2]
 
-        Stroke scales with RECORD_SUPERSAMPLE so track marks survive GPU downscale.
+        self._draw_grooves(surf, size, center, groove_c, ss_factor=1)
+        self._draw_track_marks(surf, size, center, track_c, boundaries, album_dur, ss_factor=1)
+
+        # Match the body's brightness dim so groove/body contrast stays constant.
+        brightness = self.player.vinyl_brightness
+        if brightness < 100:
+            arr = pygame.surfarray.pixels_alpha(surf)
+            arr[:] = (arr.astype(np.float32) * brightness / 100).astype(np.uint8)
+            del arr
+
+        return surf
+
+
+    @staticmethod
+    def _draw_grooves(surf, size, center, color, spacing=3, ss_factor=None):
+        """Draw the record's groove as a single continuous spiral, with subpixel AA.
+
+        Real LP grooves are a spiral, not concentric circles, so rotation has a
+        visible effect. `spacing` is the spiral pitch (radial advance per turn)
+        at display resolution; the actual stroke is 1 display pixel wide.
+
+        `ss_factor` is how much the destination surface is supersampled relative
+        to the displayed record. Defaults to RECORD_SUPERSAMPLE; pass 1 when
+        drawing onto a display-resolution overlay.
         """
-        if album_dur > 0 and boundaries:
-            groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
-            d = size * 2
-            scale = 2
-            hi = pygame.Surface((d * scale, d * scale), pygame.SRCALPHA)
-            hi_c = (size * scale, size * scale)
-            stroke = RECORD_SUPERSAMPLE
-            for b in boundaries[1:]:
-                frac = b / album_dur
-                r = int(size * scale * OUTER_GROOVE - frac * groove_range * scale)
-                pygame.draw.circle(hi, color, hi_c, r, stroke)
-            scaled = pygame.transform.smoothscale(hi, (d, d))
-            surf.blit(scaled, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+        if ss_factor is None:
+            ss_factor = RECORD_SUPERSAMPLE
+        d = size * 2
+        pitch = spacing * ss_factor
+        r_inner = size * INNER_GROOVE
+        r_outer = size * OUTER_GROOVE
+        cx = d // 2
+        cy = d // 2
 
-    def _draw_mandelbrot_vinyl(self, surf, size, center, variant, boundaries, album_dur):
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+        theta = np.arctan2(dy, dx)
+
+        in_band = (r >= r_inner) & (r <= r_outer)
+
+        spiral_phase = (2 * np.pi / pitch) * r
+        diff = np.mod(theta - spiral_phase, 2 * np.pi)
+        angular_diff = np.minimum(diff, 2 * np.pi - diff)
+        arc_dist = np.maximum(r, 1.0) * angular_diff
+
+        # 1-display-px stroke = ss_factor surface px.
+        half_stroke = ss_factor / 2.0
+        alpha_frac = np.clip(half_stroke - arc_dist + 0.5, 0.0, 1.0)
+
+        alpha_val = color[3] if len(color) == 4 else 255
+        alpha = (in_band * alpha_frac * alpha_val).astype(np.uint8)
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = color[0]
+        rgba[..., 1] = color[1]
+        rgba[..., 2] = color[2]
+        rgba[..., 3] = alpha
+
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+
+    def _draw_black_vinyl(self, surf, size, center):
+        """Draw a plain black vinyl base disc (grooves go on the overlay)."""
+        base, _, _ = VINYL_BLACK
+        pygame.draw.circle(surf, base, center, size)
+
+    def _draw_track_marks(self, surf, size, center, color, boundaries, album_dur, ss_factor=None):
+        """Draw track boundary rings at album track positions, with subpixel AA.
+
+        Track marks remain concentric circles (one per track) — they're not part
+        of the spiral, they mark where one track ends and the next begins.
+        Each ring is 2 display pixels wide.
+        """
+        if not (album_dur > 0 and boundaries):
+            return
+        if ss_factor is None:
+            ss_factor = RECORD_SUPERSAMPLE
+
+        d = size * 2
+        groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
+        cx = d // 2
+        cy = d // 2
+
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+
+        # 2-display-px stroke = ss_factor surface px.
+        ring_half_stroke = float(ss_factor)
+
+        alpha_frac = np.zeros_like(r)
+        for b in boundaries[1:]:
+            frac = b / album_dur
+            r_ring = size * OUTER_GROOVE - frac * groove_range
+            ring_alpha = np.clip(ring_half_stroke - np.abs(r - r_ring) + 0.5, 0.0, 1.0)
+            alpha_frac = np.maximum(alpha_frac, ring_alpha)
+
+        alpha_val = color[3] if len(color) == 4 else 255
+        alpha = (alpha_frac * alpha_val).astype(np.uint8)
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = color[0]
+        rgba[..., 1] = color[1]
+        rgba[..., 2] = color[2]
+        rgba[..., 3] = alpha
+
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+
+    def _draw_mandelbrot_vinyl(self, surf, size, center, variant):
         """Draw a vinyl with a Mandelbrot set pattern. Uses pre-rendered cache if available."""
         name = variant[4]
         color = variant[5]
@@ -997,12 +1081,7 @@ class Display:
 
         surf.blit(fractal, (0, 0))
 
-        # Subtle grooves — dark semi-transparent overlay
-        self._draw_grooves(surf, size, center, (0, 0, 0, 14))
-        # Track marks slightly more visible
-        self._draw_track_marks(surf, size, center, (0, 0, 0, 30), boundaries, album_dur)
-
-    def _draw_nebula_vinyl(self, surf, size, center, variant, boundaries, album_dur):
+    def _draw_nebula_vinyl(self, surf, size, center, variant):
         """Draw a vinyl with a nebula pattern. Uses pre-rendered cache if available."""
         name = variant[2]
 
@@ -1016,11 +1095,6 @@ class Display:
             nebula = _render_nebula_surface(variant, size)
 
         surf.blit(nebula, (0, 0))
-
-        # Subtle grooves — dark semi-transparent overlay
-        self._draw_grooves(surf, size, center, (0, 0, 0, 14))
-        # Track marks slightly more visible
-        self._draw_track_marks(surf, size, center, (0, 0, 0, 30), boundaries, album_dur)
 
     def _render(self):
         status = self._status_cache or self.player.get_status()
@@ -1117,20 +1191,31 @@ class Display:
         with self.player._lock:
             album_path = self.player.album_path
 
-        # Build & upload the record once per album/style/size change. GPU does the rotation.
-        cache_key = (album_path, self.player.vinyl_style, self.player.vinyl_label,
-                     self.player.vinyl_brightness, record_size, tuple(boundaries))
-        if cache_key != self._record_texture_key:
-            self._record_texture_key = cache_key
+        # Body: supersampled texture, GPU downscales 2:1 during draw.
+        body_key = (album_path, self.player.vinyl_style, self.player.vinyl_label,
+                    self.player.vinyl_brightness, record_size, 'body')
+        if body_key != self._record_texture_key:
+            self._record_texture_key = body_key
             record_surf = self._build_record(record_size * RECORD_SUPERSAMPLE,
                                              boundaries, album_dur, art_path, album_path)
             self._record_texture = sdl2_video.Texture.from_surface(self.renderer, record_surf)
+
+        # Grooves overlay: display-resolution texture, no GPU downscale,
+        # rotated with the body. Avoids moiré from sampling dense rings.
+        style = self._get_vinyl_style(album_path) or {'type': 'black'}
+        grooves_key = (style.get('type'), style.get('color'), style.get('variant'),
+                       self.player.vinyl_brightness, record_size, tuple(boundaries))
+        if grooves_key != self._grooves_texture_key:
+            self._grooves_texture_key = grooves_key
+            grooves_surf = self._build_grooves_overlay(record_size, style, boundaries, album_dur)
+            self._grooves_texture = sdl2_video.Texture.from_surface(self.renderer, grooves_surf)
 
         rec_cx = meta_x + meta_width // 2
         rec_cy = y + record_size + int(self.height * 0.01)
         d = record_size * 2
         rec_dst = pygame.Rect(rec_cx - record_size, rec_cy - record_size, d, d)
         self._record_texture.draw(dstrect=rec_dst, angle=self._record_angle)
+        self._grooves_texture.draw(dstrect=rec_dst, angle=self._record_angle)
 
         # Needle — drawn on top, not rotating with the record
         if album_dur > 0:
