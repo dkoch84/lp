@@ -953,7 +953,8 @@ class Display:
         else:  # black
             groove_c, track_c = VINYL_BLACK[1], VINYL_BLACK[2]
 
-        self._draw_grooves(surf, size, center, groove_c, ss_factor=1)
+        self._draw_grooves(surf, size, center, groove_c, ss_factor=1,
+                           boundaries=boundaries, album_dur=album_dur, gap_half_width=2)
         self._draw_track_marks(surf, size, center, track_c, boundaries, album_dur, ss_factor=1)
 
         # Match the body's brightness dim so groove/body contrast stays constant.
@@ -967,16 +968,16 @@ class Display:
 
 
     @staticmethod
-    def _draw_grooves(surf, size, center, color, spacing=3, ss_factor=None):
+    def _draw_grooves(surf, size, center, color, spacing=3, ss_factor=None,
+                      boundaries=None, album_dur=None, gap_half_width=2):
         """Draw the record's groove as a single continuous spiral, with subpixel AA.
 
-        Real LP grooves are a spiral, not concentric circles, so rotation has a
-        visible effect. `spacing` is the spiral pitch (radial advance per turn)
-        at display resolution; the actual stroke is 1 display pixel wide.
+        Real LP grooves are a spiral. Rotation has a visible effect. `spacing`
+        is the spiral pitch (radial advance per turn) at display resolution.
 
-        `ss_factor` is how much the destination surface is supersampled relative
-        to the displayed record. Defaults to RECORD_SUPERSAMPLE; pass 1 when
-        drawing onto a display-resolution overlay.
+        At each track boundary, the spiral is suppressed in a small radial band:
+        on a real LP these are flat (musicless) lead-in grooves between tracks,
+        which read visually as the boundary marker.
         """
         if ss_factor is None:
             ss_factor = RECORD_SUPERSAMPLE
@@ -995,14 +996,25 @@ class Display:
 
         in_band = (r >= r_inner) & (r <= r_outer)
 
+        # Radial distance to nearest spiral arm.
         spiral_phase = (2 * np.pi / pitch) * r
         diff = np.mod(theta - spiral_phase, 2 * np.pi)
-        angular_diff = np.minimum(diff, 2 * np.pi - diff)
-        arc_dist = np.maximum(r, 1.0) * angular_diff
+        mod_phase = np.minimum(diff, 2 * np.pi - diff)
+        radial_dist = mod_phase * pitch / (2 * np.pi)
 
         # 1-display-px stroke = ss_factor surface px.
         half_stroke = ss_factor / 2.0
-        alpha_frac = np.clip(half_stroke - arc_dist + 0.5, 0.0, 1.0)
+        alpha_frac = np.clip(half_stroke + 0.5 - radial_dist, 0.0, 1.0)
+
+        # Suppress the spiral inside each track-boundary gap.
+        if boundaries and album_dur and album_dur > 0:
+            groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
+            gap_half = gap_half_width * ss_factor
+            for b in boundaries[1:]:
+                frac = b / album_dur
+                r_boundary = size * OUTER_GROOVE - frac * groove_range
+                in_gap = np.abs(r - r_boundary) < gap_half
+                alpha_frac = np.where(in_gap, 0.0, alpha_frac)
 
         alpha_val = color[3] if len(color) == 4 else 255
         alpha = (in_band * alpha_frac * alpha_val).astype(np.uint8)
@@ -1026,7 +1038,7 @@ class Display:
 
         Track marks remain concentric circles (one per track) — they're not part
         of the spiral, they mark where one track ends and the next begins.
-        Each ring is 2 display pixels wide.
+        Each ring is 1 display pixel wide.
         """
         if not (album_dur > 0 and boundaries):
             return
@@ -1043,7 +1055,8 @@ class Display:
         dy = py - cy
         r = np.sqrt(dx * dx + dy * dy)
 
-        # 2-display-px stroke = ss_factor surface px.
+        # 2-display-px stroke = ss_factor surface px (visibly heavier than the
+        # 1-px spiral groove — these are the wider "lead-in" rings).
         ring_half_stroke = float(ss_factor)
 
         alpha_frac = np.zeros_like(r)
