@@ -699,6 +699,11 @@ class Display:
         self._dirty = True
 
     def run(self):
+        # Tell SDL to use linear filtering when sampling textures. Without this,
+        # SDL defaults to nearest-neighbor and the supersampled record texture
+        # rotates with stair-stepped edges. Must be set before Renderer is created.
+        os.environ.setdefault('SDL_HINT_RENDER_SCALE_QUALITY', '2')
+
         pygame.init()
         pygame.mixer.quit()  # Release audio device for VLC
 
