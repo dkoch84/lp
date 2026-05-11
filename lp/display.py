@@ -1,8 +1,10 @@
 import math
 import os
 import random
+import numpy as np
 import pygame
 import pygame.gfxdraw
+from pygame._sdl2 import video as sdl2_video
 
 
 DARK_BG = (17, 17, 17)
@@ -49,6 +51,17 @@ VINYL_COLORS = {
     'burgundy':     (115, 30, 55),
     'olive':        (90, 100, 35),
     'cream':        (200, 190, 160),
+    'purple':       (220, 100, 255),
+    'fire':         (255, 180, 45),
+    'ocean':        (70, 180, 255),
+    'emerald':      (100, 230, 85),
+    'gold':         (255, 200, 60),
+    'mono':         (255, 255, 255),
+    'copper':       (210, 130, 70),
+    'rose':         (200, 90, 160),
+    'rust':         (210, 105, 55),
+    'lavender':     (180, 120, 220),
+    'midnight':     (75, 60, 210),
 }
 
 # Mandelbrot color schemes: (interior, r_params, g_params, b_params, groove, track_mark)
@@ -100,18 +113,25 @@ STYLE_DISTRIBUTION = [
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'mandelbrot')
 NEBULA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'nebula')
 
-# Pre-render resolution (radius) — large enough to scale down for any display
-PRERENDER_SIZE = 400
+# Pre-render resolution (radius) — large enough to scale down for any display.
+# Sized to cover a typical 1080p display at RECORD_SUPERSAMPLE=4 with minimal upscale.
+PRERENDER_SIZE = 800
+
+# Supersample factor for the record texture. The Surface is built at SS× the
+# displayed radius, uploaded once per album, and the GPU bilinear-downscales
+# it during draw — effectively free per-frame. Build cost grows ~SS².
+RECORD_SUPERSAMPLE = 4
 
 
 # --- Nebula noise helpers ---
 
 def _make_nebula_grids(seed, count=8, grid_size=64):
-    """Generate value-noise grids for nebula rendering."""
+    """Generate value-noise grids for nebula rendering as numpy arrays."""
     rng = random.Random(seed)
     grids = []
     for _ in range(count):
-        grid = [[rng.random() for _ in range(grid_size + 1)] for _ in range(grid_size + 1)]
+        grid = np.array([[rng.random() for _ in range(grid_size + 1)]
+                         for _ in range(grid_size + 1)], dtype=np.float64)
         grids.append((grid_size, grid))
     return grids
 
@@ -121,21 +141,25 @@ def _smoothstep(t):
 
 
 def _noise2d(x, y, gi, grids):
+    """Vectorized 2D value noise. x, y are numpy arrays of the same shape."""
     g, grid = grids[gi % len(grids)]
-    x = x % g
-    y = y % g
-    ix, iy = int(x), int(y)
-    fx, fy = _smoothstep(x - ix), _smoothstep(y - iy)
+    x = np.mod(x, g)
+    y = np.mod(y, g)
+    ix = x.astype(np.int32)
+    iy = y.astype(np.int32)
+    fx = _smoothstep(x - ix)
+    fy = _smoothstep(y - iy)
     ix2 = (ix + 1) % g
     iy2 = (iy + 1) % g
-    return (grid[iy][ix] * (1 - fx) * (1 - fy) +
-            grid[iy][ix2] * fx * (1 - fy) +
-            grid[iy2][ix] * (1 - fx) * fy +
-            grid[iy2][ix2] * fx * fy)
+    return (grid[iy, ix] * (1 - fx) * (1 - fy) +
+            grid[iy, ix2] * fx * (1 - fy) +
+            grid[iy2, ix] * (1 - fx) * fy +
+            grid[iy2, ix2] * fx * fy)
 
 
 def _fbm(x, y, octaves, gi, grids):
-    val = 0.0
+    """Vectorized fractal Brownian motion."""
+    val = np.zeros_like(x)
     amp = 0.5
     freq = 1.0
     for o in range(octaves):
@@ -151,25 +175,25 @@ def _fbm(x, y, octaves, gi, grids):
 def _nebula_purple_fire(br, blend, t1, t2, t3, hs):
     r1 = br * (40 + 200 * t1)
     g1 = br * (10 + 60 * hs)
-    b1 = br * (120 + 135 * (0.5 + 0.5 * math.sin(t1 * 10.0)))
+    b1 = br * (120 + 135 * (0.5 + 0.5 * np.sin(t1 * 10.0)))
     r2 = br * (200 + 55 * t3)
     g2 = br * (80 + 140 * t1)
     b2 = br * (5 + 40 * (1 - t3))
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_ocean_emerald(br, blend, t1, t2, t3, hs):
     r1 = br * (5 + 50 * hs)
     g1 = br * (80 + 175 * t1)
-    b1 = br * (60 + 140 * (0.5 + 0.5 * math.sin(t1 * 8.0)))
+    b1 = br * (60 + 140 * (0.5 + 0.5 * np.sin(t1 * 8.0)))
     r2 = br * (10 + 40 * t3)
     g2 = br * (40 + 80 * hs)
     b2 = br * (140 + 115 * t1)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_crimson_gold(br, blend, t1, t2, t3, hs):
@@ -179,21 +203,21 @@ def _nebula_crimson_gold(br, blend, t1, t2, t3, hs):
     r2 = br * (200 + 55 * t3)
     g2 = br * (140 + 100 * t1)
     b2 = br * (5 + 20 * (1 - t3))
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_electric(br, blend, t1, t2, t3, hs):
     r1 = br * (20 + 60 * hs)
     g1 = br * (100 + 155 * t1)
-    b1 = br * (180 + 75 * (0.5 + 0.5 * math.sin(t1 * 6.0)))
+    b1 = br * (180 + 75 * (0.5 + 0.5 * np.sin(t1 * 6.0)))
     r2 = br * (200 + 55 * t1)
     g2 = br * (20 + 60 * (1 - t3))
     b2 = br * (120 + 100 * hs)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_emerald_purple(br, blend, t1, t2, t3, hs):
@@ -202,10 +226,10 @@ def _nebula_emerald_purple(br, blend, t1, t2, t3, hs):
     b1 = br * (30 + 60 * t3)
     r2 = br * (100 + 120 * t1)
     g2 = br * (10 + 40 * hs)
-    b2 = br * (140 + 115 * (0.5 + 0.5 * math.sin(t1 * 8.0)))
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    b2 = br * (140 + 115 * (0.5 + 0.5 * np.sin(t1 * 8.0)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_deep_emerald(br, blend, t1, t2, t3, hs):
@@ -213,7 +237,7 @@ def _nebula_deep_emerald(br, blend, t1, t2, t3, hs):
     r = 40 + 30 * blend + 20 * hs
     g = 150 + 60 * t1 + 30 * blend
     b = 65 + 40 * t3 + 20 * (1 - blend)
-    return (int(r), int(g), int(b))
+    return (r, g, b)
 
 
 def _nebula_bone(br, blend, t1, t2, t3, hs):
@@ -224,9 +248,9 @@ def _nebula_bone(br, blend, t1, t2, t3, hs):
     r2 = base * (190 + 40 * t3)
     g2 = base * (175 + 35 * t1)
     b2 = base * (155 + 30 * hs)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_cream_rose(br, blend, t1, t2, t3, hs):
@@ -237,9 +261,9 @@ def _nebula_cream_rose(br, blend, t1, t2, t3, hs):
     r2 = base * (220 + 35 * t1)
     g2 = base * (160 + 50 * hs)
     b2 = base * (165 + 50 * t3)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_marble(br, blend, t1, t2, t3, hs):
@@ -250,9 +274,9 @@ def _nebula_marble(br, blend, t1, t2, t3, hs):
     r2 = base * (140 + 60 * t3)
     g2 = base * (145 + 55 * t1)
     b2 = base * (160 + 60 * hs)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_cream_green(br, blend, t1, t2, t3, hs):
@@ -263,23 +287,23 @@ def _nebula_cream_green(br, blend, t1, t2, t3, hs):
     r2 = base * (185 + 25 * t3)
     g2 = base * (215 + 25 * t1)
     b2 = base * (175 + 20 * hs)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_galaxy(br, blend, t1, t2, t3, hs):
     br2 = br * br
     r1 = br2 * (80 + 175 * t1)
     g1 = br2 * (30 + 80 * hs)
-    b1 = br2 * (120 + 135 * (0.5 + 0.5 * math.sin(t1 * 8.0)))
+    b1 = br2 * (120 + 135 * (0.5 + 0.5 * np.sin(t1 * 8.0)))
     r2 = br2 * (20 + 60 * t3)
     g2 = br2 * (15 + 50 * t1)
     b2 = br2 * (80 + 160 * hs)
-    star = max(0, t1 * t2 * 4 - 1.2) ** 2
-    return (int(r1 * blend + r2 * (1 - blend) + star * 200),
-            int(g1 * blend + g2 * (1 - blend) + star * 180),
-            int(b1 * blend + b2 * (1 - blend) + star * 255))
+    star = np.maximum(0, t1 * t2 * 4 - 1.2) ** 2
+    return (r1 * blend + r2 * (1 - blend) + star * 200,
+            g1 * blend + g2 * (1 - blend) + star * 180,
+            b1 * blend + b2 * (1 - blend) + star * 255)
 
 
 def _nebula_galaxy_warm(br, blend, t1, t2, t3, hs):
@@ -290,24 +314,24 @@ def _nebula_galaxy_warm(br, blend, t1, t2, t3, hs):
     r2 = br2 * (180 + 75 * t3)
     g2 = br2 * (80 + 120 * t1)
     b2 = br2 * (15 + 40 * hs)
-    star = max(0, t1 * t2 * 4 - 1.2) ** 2
-    return (int(r1 * blend + r2 * (1 - blend) + star * 220),
-            int(g1 * blend + g2 * (1 - blend) + star * 200),
-            int(b1 * blend + b2 * (1 - blend) + star * 160))
+    star = np.maximum(0, t1 * t2 * 4 - 1.2) ** 2
+    return (r1 * blend + r2 * (1 - blend) + star * 220,
+            g1 * blend + g2 * (1 - blend) + star * 200,
+            b1 * blend + b2 * (1 - blend) + star * 160)
 
 
 def _nebula_galaxy_cold(br, blend, t1, t2, t3, hs):
     br2 = br * br
     r1 = br2 * (15 + 60 * hs)
     g1 = br2 * (80 + 140 * t1)
-    b1 = br2 * (160 + 95 * (0.5 + 0.5 * math.sin(t1 * 6.0)))
+    b1 = br2 * (160 + 95 * (0.5 + 0.5 * np.sin(t1 * 6.0)))
     r2 = br2 * (30 + 50 * t3)
     g2 = br2 * (40 + 80 * t1)
     b2 = br2 * (130 + 125 * hs)
-    star = max(0, t1 * t2 * 4 - 1.2) ** 2
-    return (int(r1 * blend + r2 * (1 - blend) + star * 180),
-            int(g1 * blend + g2 * (1 - blend) + star * 220),
-            int(b1 * blend + b2 * (1 - blend) + star * 255))
+    star = np.maximum(0, t1 * t2 * 4 - 1.2) ** 2
+    return (r1 * blend + r2 * (1 - blend) + star * 180,
+            g1 * blend + g2 * (1 - blend) + star * 220,
+            b1 * blend + b2 * (1 - blend) + star * 255)
 
 
 def _nebula_oil_spill(br, blend, t1, t2, t3, hs):
@@ -317,10 +341,10 @@ def _nebula_oil_spill(br, blend, t1, t2, t3, hs):
     r2 = br * (130 + 70 * t3)
     g2 = br * (50 + 60 * t1)
     b2 = br * (60 + 70 * hs)
-    pop = max(0, t1 * t2 * 3 - 0.9)
-    return (int(r1 * blend + r2 * (1 - blend) + pop * 80),
-            int(g1 * blend + g2 * (1 - blend) + pop * 100),
-            int(b1 * blend + b2 * (1 - blend) + pop * 90))
+    pop = np.maximum(0, t1 * t2 * 3 - 0.9)
+    return (r1 * blend + r2 * (1 - blend) + pop * 80,
+            g1 * blend + g2 * (1 - blend) + pop * 100,
+            b1 * blend + b2 * (1 - blend) + pop * 90)
 
 
 def _nebula_absinthe(br, blend, t1, t2, t3, hs):
@@ -330,10 +354,10 @@ def _nebula_absinthe(br, blend, t1, t2, t3, hs):
     r2 = br * (100 + 80 * t1)
     g2 = br * (30 + 50 * hs)
     b2 = br * (90 + 80 * t3)
-    pop = max(0, t1 * t2 * 3 - 0.85)
-    return (int(r1 * blend + r2 * (1 - blend) + pop * 120),
-            int(g1 * blend + g2 * (1 - blend) + pop * 70),
-            int(b1 * blend + b2 * (1 - blend) + pop * 30))
+    pop = np.maximum(0, t1 * t2 * 3 - 0.85)
+    return (r1 * blend + r2 * (1 - blend) + pop * 120,
+            g1 * blend + g2 * (1 - blend) + pop * 70,
+            b1 * blend + b2 * (1 - blend) + pop * 30)
 
 
 def _nebula_coral_reef(br, blend, t1, t2, t3, hs):
@@ -343,10 +367,10 @@ def _nebula_coral_reef(br, blend, t1, t2, t3, hs):
     r2 = br * (40 + 60 * t3)
     g2 = br * (140 + 80 * t1)
     b2 = br * (130 + 70 * hs)
-    pop = max(0, t1 * t2 * 3 - 0.9)
-    return (int(r1 * blend + r2 * (1 - blend) + pop * 60),
-            int(g1 * blend + g2 * (1 - blend) + pop * 90),
-            int(b1 * blend + b2 * (1 - blend) + pop * 40))
+    pop = np.maximum(0, t1 * t2 * 3 - 0.9)
+    return (r1 * blend + r2 * (1 - blend) + pop * 60,
+            g1 * blend + g2 * (1 - blend) + pop * 90,
+            b1 * blend + b2 * (1 - blend) + pop * 40)
 
 
 def _nebula_bruise(br, blend, t1, t2, t3, hs):
@@ -356,9 +380,9 @@ def _nebula_bruise(br, blend, t1, t2, t3, hs):
     r2 = br * (120 + 60 * t3)
     g2 = br * (110 + 60 * t1)
     b2 = br * (30 + 40 * hs)
-    return (int(r1 * blend + r2 * (1 - blend)),
-            int(g1 * blend + g2 * (1 - blend)),
-            int(b1 * blend + b2 * (1 - blend)))
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
 
 
 def _nebula_molten(br, blend, t1, t2, t3, hs):
@@ -368,10 +392,10 @@ def _nebula_molten(br, blend, t1, t2, t3, hs):
     r2 = br * (140 + 60 * t3)
     g2 = br * (25 + 40 * hs)
     b2 = br * (50 + 60 * t1)
-    pop = max(0, t1 * t2 * 3 - 0.85)
-    return (int(r1 * blend + r2 * (1 - blend) + pop * 100),
-            int(g1 * blend + g2 * (1 - blend) + pop * 120),
-            int(b1 * blend + b2 * (1 - blend) + pop * 20))
+    pop = np.maximum(0, t1 * t2 * 3 - 0.85)
+    return (r1 * blend + r2 * (1 - blend) + pop * 100,
+            g1 * blend + g2 * (1 - blend) + pop * 120,
+            b1 * blend + b2 * (1 - blend) + pop * 20)
 
 
 def _nebula_lava_lamp(br, blend, t1, t2, t3, hs):
@@ -381,10 +405,10 @@ def _nebula_lava_lamp(br, blend, t1, t2, t3, hs):
     r2 = br * (120 + 80 * t3)
     g2 = br * (10 + 30 * hs)
     b2 = br * (140 + 115 * t1)
-    pop = max(0, t1 * t2 * 3 - 0.9)
-    return (int(r1 * blend + r2 * (1 - blend) + pop * 200),
-            int(g1 * blend + g2 * (1 - blend) + pop * 180),
-            int(b1 * blend + b2 * (1 - blend) + pop * 30))
+    pop = np.maximum(0, t1 * t2 * 3 - 0.9)
+    return (r1 * blend + r2 * (1 - blend) + pop * 200,
+            g1 * blend + g2 * (1 - blend) + pop * 180,
+            b1 * blend + b2 * (1 - blend) + pop * 30)
 
 
 # Nebula variants: (seed, palette_func, name, saturation, warp_octaves, arm_octaves)
@@ -413,62 +437,64 @@ NEBULA_VARIANTS = [
 
 
 def _render_nebula_surface(variant, size):
-    """Render a nebula-style vinyl disc. Returns a pygame Surface."""
+    """Render a nebula-style vinyl disc. Vectorized over the full pixel grid."""
     seed, palette_fn, _name, sat, warp_oct, arm_oct = variant
     grids = _make_nebula_grids(seed)
 
     d = size * 2
     sm = max(size // 2, 40)
     d_sm = sm * 2
-    surf = pygame.Surface((d_sm, d_sm), pygame.SRCALPHA)
     sc = sm
     max_r_sq = (sm * 0.95) ** 2
 
-    for py in range(d_sm):
-        for px in range(d_sm):
-            dx, dy = px - sc, py - sc
-            if dx * dx + dy * dy > max_r_sq:
-                continue
-            dist = math.sqrt(dx * dx + dy * dy) / sm
-            angle = math.atan2(dy, dx)
+    py, px = np.mgrid[0:d_sm, 0:d_sm].astype(np.float64)
+    dx = px - sc
+    dy = py - sc
+    inside = dx * dx + dy * dy <= max_r_sq
+    dist = np.sqrt(dx * dx + dy * dy) / sm
+    angle = np.arctan2(dy, dx)
 
-            nx = px / sm * 3.0
-            ny = py / sm * 3.0
+    nx = px / sm * 3.0
+    ny = py / sm * 3.0
 
-            wx = nx + _fbm(nx + 1.7, ny + 9.2, warp_oct, 0, grids) * 3.0
-            wy = ny + _fbm(nx + 8.3, ny + 2.8, warp_oct, 2, grids) * 3.0
-            wx2 = wx + _fbm(wx * 0.8 + 3.1, wy * 0.8 + 7.7, max(warp_oct - 1, 2), 4, grids) * 2.0
-            wy2 = wy + _fbm(wx * 0.8 + 1.3, wy * 0.8 + 4.9, max(warp_oct - 1, 2), 6, grids) * 2.0
+    wx = nx + _fbm(nx + 1.7, ny + 9.2, warp_oct, 0, grids) * 3.0
+    wy = ny + _fbm(nx + 8.3, ny + 2.8, warp_oct, 2, grids) * 3.0
+    wx2 = wx + _fbm(wx * 0.8 + 3.1, wy * 0.8 + 7.7, max(warp_oct - 1, 2), 4, grids) * 2.0
+    wy2 = wy + _fbm(wx * 0.8 + 1.3, wy * 0.8 + 4.9, max(warp_oct - 1, 2), 6, grids) * 2.0
 
-            sa = math.sin(angle * 2.0) * dist * 2.5
-            ca = math.cos(angle * 2.0) * dist * 2.5
-            arm = _fbm(wx2 + sa, wy2 + ca, arm_oct, 1, grids)
-            cloud1 = _fbm(wx2 * 1.2, wy2 * 1.2, arm_oct, 3, grids)
-            cloud2 = _fbm(wx2 * 0.7 + 20, wy2 * 0.7 + 20, max(arm_oct - 1, 3), 5, grids)
+    sa = np.sin(angle * 2.0) * dist * 2.5
+    ca = np.cos(angle * 2.0) * dist * 2.5
+    arm = _fbm(wx2 + sa, wy2 + ca, arm_oct, 1, grids)
+    cloud1 = _fbm(wx2 * 1.2, wy2 * 1.2, arm_oct, 3, grids)
+    cloud2 = _fbm(wx2 * 0.7 + 20, wy2 * 0.7 + 20, max(arm_oct - 1, 3), 5, grids)
 
-            t1, t2, t3 = arm, cloud1, cloud2
-            brightness = 0.2 + 0.65 * t1 + 0.3 * t2
-            brightness *= (1.0 - dist * 0.3)
-            brightness = max(0.0, min(1.0, (brightness - 0.15) * 1.4))
-            hue_shift = _fbm(nx * 0.8, ny * 0.8, 3, 0, grids)
-            blend = _smoothstep(max(0.0, min(1.0, (t1 - 0.3) * 2.5)))
+    t1, t2, t3 = arm, cloud1, cloud2
+    brightness = 0.2 + 0.65 * t1 + 0.3 * t2
+    brightness *= (1.0 - dist * 0.3)
+    brightness = np.clip((brightness - 0.15) * 1.4, 0.0, 1.0)
+    hue_shift = _fbm(nx * 0.8, ny * 0.8, 3, 0, grids)
+    blend = _smoothstep(np.clip((t1 - 0.3) * 2.5, 0.0, 1.0))
 
-            r, g, b = palette_fn(brightness, blend, t1, t2, t3, hue_shift)
+    r, g, b = palette_fn(brightness, blend, t1, t2, t3, hue_shift)
 
-            avg = (r + g + b) / 3.0
-            r = int(avg + (r - avg) * sat)
-            g = int(avg + (g - avg) * sat)
-            b = int(avg + (b - avg) * sat)
+    avg = (r + g + b) / 3.0
+    r = avg + (r - avg) * sat
+    g = avg + (g - avg) * sat
+    b = avg + (b - avg) * sat
 
-            if dist < 0.2:
-                core = (1 - dist / 0.2) ** 2
-                r = int(r + core * (255 - r) * 0.7)
-                g = int(g + core * (220 - g) * 0.5)
-                b = int(b + core * (255 - b) * 0.6)
+    core_mask = dist < 0.2
+    core = np.where(core_mask, (1 - dist / 0.2) ** 2, 0.0)
+    r = r + core * (255 - r) * 0.7
+    g = g + core * (220 - g) * 0.5
+    b = b + core * (255 - b) * 0.6
 
-            surf.set_at((px, py), (min(255, max(0, r)),
-                                   min(255, max(0, g)),
-                                   min(255, max(0, b)), 255))
+    r = np.where(inside, np.clip(r, 0, 255), 0).astype(np.uint8)
+    g = np.where(inside, np.clip(g, 0, 255), 0).astype(np.uint8)
+    b = np.where(inside, np.clip(b, 0, 255), 0).astype(np.uint8)
+    a = np.where(inside, 255, 0).astype(np.uint8)
+
+    rgba = np.stack([r, g, b, a], axis=-1).tobytes()
+    surf = pygame.image.frombuffer(rgba, (d_sm, d_sm), 'RGBA').copy()
 
     # Blur and upscale
     blur1 = d // 2
@@ -482,7 +508,7 @@ def _render_nebula_surface(variant, size):
 
 
 def _render_mandelbrot_surface(variant, size):
-    """Render a mandelbrot fractal disc at given radius. Returns a pygame Surface."""
+    """Render a mandelbrot fractal disc. Vectorized escape-time over the full grid."""
     cx_m, cy_m, zoom, max_iter, _name, color_key = variant
     scheme = MANDELBROT_COLORS.get(color_key, MANDELBROT_COLORS['purple'])
     base_dark, r_p, g_p, b_p, _groove, _track = scheme
@@ -490,31 +516,45 @@ def _render_mandelbrot_surface(variant, size):
     d = size * 2
     sm = max(size // 2, 40)
     d_sm = sm * 2
-    sm_surf = pygame.Surface((d_sm, d_sm), pygame.SRCALPHA)
     sc = sm
     max_r_sq = (sm * 0.95) ** 2
 
-    for py in range(d_sm):
-        for px in range(d_sm):
-            dx, dy = px - sc, py - sc
-            if dx * dx + dy * dy > max_r_sq:
-                continue
-            cr = cx_m + (px - sc) / sm / zoom
-            ci = cy_m + (py - sc) / sm / zoom
-            zr, zi = 0.0, 0.0
-            i = 0
-            while zr * zr + zi * zi <= 4.0 and i < max_iter:
-                zr, zi = zr * zr - zi * zi + cr, 2.0 * zr * zi + ci
-                i += 1
-            if i == max_iter:
-                color = base_dark
-            else:
-                t = i / max_iter
-                r = int(r_p[0] + r_p[1] * (0.5 + 0.5 * math.sin(t * r_p[2] + r_p[3])))
-                g = int(g_p[0] + g_p[1] * (0.5 + 0.5 * math.sin(t * g_p[2] + g_p[3])))
-                b = int(b_p[0] + b_p[1] * (0.5 + 0.5 * math.sin(t * b_p[2] + b_p[3])))
-                color = (min(255, r), min(255, g), min(255, b))
-            sm_surf.set_at((px, py), (*color, 255))
+    py, px = np.mgrid[0:d_sm, 0:d_sm].astype(np.float64)
+    dx = px - sc
+    dy = py - sc
+    inside = dx * dx + dy * dy <= max_r_sq
+
+    c = (cx_m + dx / sm / zoom) + 1j * (cy_m + dy / sm / zoom)
+    z = np.zeros_like(c)
+    iters = np.full(c.shape, max_iter, dtype=np.int32)
+    active = inside.copy()
+
+    for step in range(max_iter):
+        z = np.where(active, z * z + c, z)
+        escaped = active & (z.real * z.real + z.imag * z.imag > 4.0)
+        iters[escaped] = step + 1
+        active = active & ~escaped
+        if not active.any():
+            break
+
+    t = iters.astype(np.float64) / max_iter
+    r_arr = r_p[0] + r_p[1] * (0.5 + 0.5 * np.sin(t * r_p[2] + r_p[3]))
+    g_arr = g_p[0] + g_p[1] * (0.5 + 0.5 * np.sin(t * g_p[2] + g_p[3]))
+    b_arr = b_p[0] + b_p[1] * (0.5 + 0.5 * np.sin(t * b_p[2] + b_p[3]))
+
+    # Interior pixels (never escaped) get base_dark
+    interior = iters == max_iter
+    r_arr = np.where(interior, base_dark[0], r_arr)
+    g_arr = np.where(interior, base_dark[1], g_arr)
+    b_arr = np.where(interior, base_dark[2], b_arr)
+
+    r_arr = np.where(inside, np.clip(r_arr, 0, 255), 0).astype(np.uint8)
+    g_arr = np.where(inside, np.clip(g_arr, 0, 255), 0).astype(np.uint8)
+    b_arr = np.where(inside, np.clip(b_arr, 0, 255), 0).astype(np.uint8)
+    a_arr = np.where(inside, 255, 0).astype(np.uint8)
+
+    rgba = np.stack([r_arr, g_arr, b_arr, a_arr], axis=-1).tobytes()
+    sm_surf = pygame.image.frombuffer(rgba, (d_sm, d_sm), 'RGBA').copy()
 
     # Blur
     blur1 = d // 2
@@ -634,16 +674,21 @@ class Display:
         self.url = self.config.get('url', 'https://lp.example.com')
 
         self._dirty = True
-        self._art_surface = None
         self._art_path = None
+        self._art_texture = None
         self._status_cache = None
         self._record_angle = 0.0
         self._label_art = None
         self._label_art_path = None
         self._current_vinyl_style = None
         self._current_album_path = None
-        self._record_cache = None
-        self._record_cache_key = None
+        self._record_texture = None
+        self._record_texture_key = None
+        self._text_cache = {}
+        self._needle_tex = None
+
+        self.window = None
+        self.renderer = None
 
         player.on('play_start', self._mark_dirty)
         player.on('track_change', self._mark_dirty)
@@ -656,19 +701,24 @@ class Display:
     def run(self):
         pygame.init()
         pygame.mixer.quit()  # Release audio device for VLC
-        pygame.display.set_caption('lp')
 
-        flags = 0
         if self.fullscreen:
-            flags = pygame.FULLSCREEN
-            info = pygame.display.Info()
-            self.width = info.current_w
-            self.height = info.current_h
+            self.window = sdl2_video.Window('lp', size=(self.width, self.height),
+                                            fullscreen_desktop=True)
+            self.width, self.height = self.window.size
+        else:
+            self.window = sdl2_video.Window('lp', size=(self.width, self.height))
 
-        self.screen = pygame.display.set_mode((self.width, self.height), flags)
+        try:
+            self.renderer = sdl2_video.Renderer(self.window, accelerated=1, vsync=True)
+        except pygame.error as e:
+            print(f'WARN: GPU renderer unavailable ({e}); falling back to software')
+            self.renderer = sdl2_video.Renderer(self.window, accelerated=0)
+
         self.clock = pygame.time.Clock()
 
         self._load_fonts()
+        self._build_needle_texture()
         self._poll_counter = 0
 
         running = True
@@ -697,7 +747,7 @@ class Display:
             if self._dirty:
                 self._dirty = False
                 self._render()
-                pygame.display.flip()
+                self.renderer.present()
 
             self.clock.tick(30)
 
@@ -708,6 +758,23 @@ class Display:
         self._font_medium = pygame.font.SysFont('sans', int(self.height * 0.026))
         self._font_small = pygame.font.SysFont('sans', int(self.height * 0.02))
         self._font_idle = pygame.font.SysFont('sans', int(self.height * 0.12))
+
+    def _text_tex(self, key, font, text, color):
+        """Get a cached text Texture; re-render only when content/color changes."""
+        cached = self._text_cache.get(key)
+        if cached and cached[0] == text and cached[1] == color:
+            return cached[2], cached[3]
+        surf = font.render(text, True, color)
+        tex = sdl2_video.Texture.from_surface(self.renderer, surf)
+        rect = surf.get_rect()
+        self._text_cache[key] = (text, color, tex, rect)
+        return tex, rect
+
+    def _build_needle_texture(self):
+        """Pre-build the small needle-tip circle as a Texture (drawn each frame)."""
+        s = pygame.Surface((9, 9), pygame.SRCALPHA)
+        pygame.draw.circle(s, NEEDLE_COLOR, (4, 4), 3)
+        self._needle_tex = sdl2_video.Texture.from_surface(self.renderer, s)
 
     def _get_circular_art(self, art_path, radius):
         """Get album art masked into a circle at the given radius."""
@@ -946,17 +1013,22 @@ class Display:
             self._render_playing(status)
 
     def _render_idle(self):
-        self.screen.fill(DARK_BG)
-        text = self._font_idle.render('lp', True, DIM_TEXT)
-        rect = text.get_rect(center=(self.width // 2, self.height // 2 - int(self.height * 0.05)))
-        self.screen.blit(text, rect)
+        self.renderer.draw_color = DARK_BG
+        self.renderer.clear()
 
-        url_surf = self._font_small.render(self.url, True, DIM_TEXT)
-        url_rect = url_surf.get_rect(center=(self.width // 2, self.height // 2 + int(self.height * 0.08)))
-        self.screen.blit(url_surf, url_rect)
+        tex, rect = self._text_tex('idle_lp', self._font_idle, 'lp', DIM_TEXT)
+        dst = rect.copy()
+        dst.center = (self.width // 2, self.height // 2 - int(self.height * 0.05))
+        tex.draw(dstrect=dst)
+
+        tex, rect = self._text_tex('idle_url', self._font_small, self.url, DIM_TEXT)
+        dst = rect.copy()
+        dst.center = (self.width // 2, self.height // 2 + int(self.height * 0.08))
+        tex.draw(dstrect=dst)
 
     def _render_playing(self, status):
-        self.screen.fill(DARK_BG)
+        self.renderer.draw_color = DARK_BG
+        self.renderer.clear()
 
         art_width = int(self.height * 1.0)
         if art_width > int(self.width * 0.56):
@@ -964,23 +1036,28 @@ class Display:
         meta_x = art_width
         meta_width = self.width - art_width
 
-        # Album art
+        # Album art — upload to a Texture once per art change
         art_path, _ = self.player.get_current_song_info()
-        if art_path and art_path != self._art_path:
+        if art_path != self._art_path:
             self._art_path = art_path
-            try:
-                img = pygame.image.load(art_path)
-                self._art_surface = pygame.transform.smoothscale(img, (art_width, self.height))
-            except Exception:
-                self._art_surface = None
+            self._art_texture = None
+            if art_path:
+                try:
+                    img = pygame.image.load(art_path)
+                    art_surf = pygame.transform.smoothscale(img, (art_width, self.height))
+                    self._art_texture = sdl2_video.Texture.from_surface(self.renderer, art_surf)
+                except Exception:
+                    self._art_texture = None
 
-        if self._art_surface:
-            self.screen.blit(self._art_surface, (0, 0))
+        if self._art_texture:
+            self._art_texture.draw(dstrect=pygame.Rect(0, 0, art_width, self.height))
         else:
-            pygame.draw.rect(self.screen, PANEL_BG, (0, 0, art_width, self.height))
+            self.renderer.draw_color = PANEL_BG
+            self.renderer.fill_rect(pygame.Rect(0, 0, art_width, self.height))
 
         # Metadata panel
-        pygame.draw.rect(self.screen, PANEL_BG, (meta_x, 0, meta_width, self.height))
+        self.renderer.draw_color = PANEL_BG
+        self.renderer.fill_rect(pygame.Rect(meta_x, 0, meta_width, self.height))
 
         pad = int(meta_width * 0.08)
         x = meta_x + pad
@@ -988,23 +1065,23 @@ class Display:
 
         # Artist
         if status.get('artist'):
-            surf = self._font_large.render(status['artist'], True, TEXT_COLOR)
-            self.screen.blit(surf, (x, y))
-            y += surf.get_height() + int(self.height * 0.015)
+            tex, rect = self._text_tex('artist', self._font_large, status['artist'], TEXT_COLOR)
+            tex.draw(dstrect=pygame.Rect(x, y, rect.w, rect.h))
+            y += rect.h + int(self.height * 0.015)
 
         # Album
         if status.get('album'):
-            surf = self._font_large.render(status['album'], True, ACCENT)
-            self.screen.blit(surf, (x, y))
-            y += surf.get_height() + int(self.height * 0.012)
+            tex, rect = self._text_tex('album', self._font_large, status['album'], ACCENT)
+            tex.draw(dstrect=pygame.Rect(x, y, rect.w, rect.h))
+            y += rect.h + int(self.height * 0.012)
 
         # Year
         date = status.get('date') or ''
         year = date[:4] if len(date) >= 4 else date
         if year:
-            surf = self._font_medium.render(year, True, DIM_TEXT)
-            self.screen.blit(surf, (x, y))
-            y += surf.get_height() + int(self.height * 0.02)
+            tex, rect = self._text_tex('year', self._font_medium, year, DIM_TEXT)
+            tex.draw(dstrect=pygame.Rect(x, y, rect.w, rect.h))
+            y += rect.h + int(self.height * 0.02)
 
         # Spinning record — size to fit remaining space
         progress = status.get('progress', {})
@@ -1022,18 +1099,20 @@ class Display:
         with self.player._lock:
             album_path = self.player.album_path
 
-        # Cache the record surface — only rebuild when album/style/size changes
+        # Build & upload the record once per album/style/size change. GPU does the rotation.
         cache_key = (album_path, self.player.vinyl_style, self.player.vinyl_label,
                      self.player.vinyl_brightness, record_size, tuple(boundaries))
-        if cache_key != self._record_cache_key:
-            self._record_cache_key = cache_key
-            self._record_cache = self._build_record(record_size, boundaries, album_dur, art_path, album_path)
-        record_surf = self._record_cache
-        rotated = pygame.transform.rotate(record_surf, self._record_angle)
+        if cache_key != self._record_texture_key:
+            self._record_texture_key = cache_key
+            record_surf = self._build_record(record_size * RECORD_SUPERSAMPLE,
+                                             boundaries, album_dur, art_path, album_path)
+            self._record_texture = sdl2_video.Texture.from_surface(self.renderer, record_surf)
+
         rec_cx = meta_x + meta_width // 2
         rec_cy = y + record_size + int(self.height * 0.01)
-        rec_rect = rotated.get_rect(center=(rec_cx, rec_cy))
-        self.screen.blit(rotated, rec_rect)
+        d = record_size * 2
+        rec_dst = pygame.Rect(rec_cx - record_size, rec_cy - record_size, d, d)
+        self._record_texture.draw(dstrect=rec_dst, angle=self._record_angle)
 
         # Needle — drawn on top, not rotating with the record
         if album_dur > 0:
@@ -1043,11 +1122,15 @@ class Display:
         groove_range = (OUTER_GROOVE - INNER_GROOVE) * record_size
         needle_r = record_size * OUTER_GROOVE - frac * groove_range
         needle_angle = math.radians(-60)
-        needle_x = rec_cx + needle_r * math.cos(needle_angle)
-        needle_y = rec_cy + needle_r * math.sin(needle_angle)
+        needle_x = int(rec_cx + needle_r * math.cos(needle_angle))
+        needle_y = int(rec_cy + needle_r * math.sin(needle_angle))
 
-        # Tonearm line from pivot to needle tip
-        pivot_x = rec_cx + record_size * 1.15
-        pivot_y = rec_cy - record_size * 0.9
-        pygame.draw.line(self.screen, (70, 70, 70), (pivot_x, pivot_y), (int(needle_x), int(needle_y)), 2)
-        pygame.draw.circle(self.screen, NEEDLE_COLOR, (int(needle_x), int(needle_y)), 3)
+        # Tonearm — two parallel lines to simulate the old width=2
+        pivot_x = int(rec_cx + record_size * 1.15)
+        pivot_y = int(rec_cy - record_size * 0.9)
+        self.renderer.draw_color = (70, 70, 70)
+        self.renderer.draw_line((pivot_x, pivot_y), (needle_x, needle_y))
+        self.renderer.draw_line((pivot_x, pivot_y + 1), (needle_x, needle_y + 1))
+
+        # Needle dot — pre-built tiny texture
+        self._needle_tex.draw(dstrect=pygame.Rect(needle_x - 4, needle_y - 4, 9, 9))
