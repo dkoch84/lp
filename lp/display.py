@@ -103,11 +103,6 @@ NEBULA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'nebula')
 # Pre-render resolution (radius) — large enough to scale down for any display
 PRERENDER_SIZE = 400
 
-# Supersample factor for the spinning record. The cached record surface is built
-# at SS× the displayed radius, then rotated+downscaled each frame via rotozoom.
-# Smooths rim, label text, grooves, and track marks. Set to 1 to disable.
-RECORD_SUPERSAMPLE = 2
-
 
 # --- Nebula noise helpers ---
 
@@ -1032,10 +1027,9 @@ class Display:
                      self.player.vinyl_brightness, record_size, tuple(boundaries))
         if cache_key != self._record_cache_key:
             self._record_cache_key = cache_key
-            build_size = record_size * RECORD_SUPERSAMPLE
-            self._record_cache = self._build_record(build_size, boundaries, album_dur, art_path, album_path)
+            self._record_cache = self._build_record(record_size, boundaries, album_dur, art_path, album_path)
         record_surf = self._record_cache
-        rotated = pygame.transform.rotozoom(record_surf, self._record_angle, 1.0 / RECORD_SUPERSAMPLE)
+        rotated = pygame.transform.rotate(record_surf, self._record_angle)
         rec_cx = meta_x + meta_width // 2
         rec_cy = y + record_size + int(self.height * 0.01)
         rec_rect = rotated.get_rect(center=(rec_cx, rec_cy))
