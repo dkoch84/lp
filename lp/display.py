@@ -1,6 +1,9 @@
+import io
 import math
 import os
 import random
+import threading
+import time
 import numpy as np
 import pygame
 import pygame.gfxdraw
@@ -71,7 +74,7 @@ VINYL_COLORS = {
 VINYL_GROOVE_COLORS = {
     # Light bodies — dark shadow haze (subtle)
     'cream':      ((0, 0, 0, 7),        (0, 0, 0, 28)),
-    'mono':       ((0, 0, 0, 7),        (0, 0, 0, 28)),
+    'mono':       ((0, 0, 0, 4),        (0, 0, 0, 28)),
     'fire':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
     'gold':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
     'ocean':      ((0, 0, 0, 9),        (0, 0, 0, 36)),
@@ -82,24 +85,24 @@ VINYL_GROOVE_COLORS = {
     'copper':     ((0, 0, 0, 9),        (0, 0, 0, 36)),
     'rust':       ((0, 0, 0, 10),       (0, 0, 0, 40)),
     # Dark bodies — light additive shine
-    'red':        ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'navy':       ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'forest':     ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'plum':       ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'chocolate':  ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'slate':      ((255, 255, 255, 7),  (255, 255, 255, 36)),
-    'amber':      ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'teal':       ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'burgundy':   ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'olive':      ((255, 255, 255, 8),  (255, 255, 255, 45)),
-    'midnight':   ((255, 255, 255, 8),  (255, 255, 255, 45)),
+    'red':        ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'navy':       ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'forest':     ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'plum':       ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'chocolate':  ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'slate':      ((255, 255, 255, 25), (255, 255, 255, 36)),
+    'amber':      ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'teal':       ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'burgundy':   ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'olive':      ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'midnight':   ((255, 255, 255, 35), (255, 255, 255, 45)),
 }
 
 # Plain black vinyl: light grooves (light catching the spiral) on a dark body.
 BLACK_GROOVE_COLORS = ((90, 90, 90, 80), (110, 110, 110, 130))
 
 # Transparent / clear vinyl.
-CLEAR_GROOVE_COLORS = ((255, 255, 255, 10), (255, 255, 255, 22))
+CLEAR_GROOVE_COLORS = ((255, 255, 255, 55), (255, 255, 255, 90))
 
 # Picture disc (uses album art as the entire face).
 PICTURE_GROOVE_COLORS = ((0, 0, 0, 12), (0, 0, 0, 26))
@@ -155,19 +158,57 @@ MANDELBROT_VARIANTS = [
     for color in MANDELBROT_COLORS
 ]
 
+# Munafo deep-zoom variants: (config_name, style_id, display_label). Each
+# entry maps to a locked config in ../munafo_work/configs/ whose PNG
+# snapshot is the source of truth — the renderer downsamples that snapshot
+# rather than re-running the perturbation engine (which takes minutes/GPU).
+MUNAFO_VARIANTS = [
+    ('deep5_v1', 'munafo-deep5', 'Pastel Coral'),     # peach + cyan + lime
+    ('deep6_v1', 'munafo-deep6', 'Rainbow Atoll'),    # rainbow rings, period-101
+    ('deep7_v1', 'munafo-deep7', 'Magenta Flower'),   # coral + magenta + teal
+]
+
+# Per-munafo-variant groove + track-mark colors. Keyed on config name.
+# Tuned to each palette's dominant field — dark grooves (normal alpha) on
+# light fields read as shadow; light grooves (additive) on dark fields read
+# as shine. Brightness >128 in the color triggers additive blending in
+# _build_grooves_overlay.
+MUNAFO_GROOVE_COLORS = {
+    'deep5_v1': ((0, 0, 0, 32), (0, 0, 0, 60)),   # peach field — dark grooves
+    'deep6_v1': ((0, 0, 0, 30), (0, 0, 0, 56)),   # bright yellow outer — dark
+    'deep7_v1': ((0, 0, 0, 28), (0, 0, 0, 52)),   # magenta/coral mid — dark
+}
+
 # Style weights
 STYLE_DISTRIBUTION = [
     ('black', 15),
-    ('color', 15),
-    ('mandelbrot', 25),
-    ('nebula', 25),
-    ('clear', 10),
-    ('picture', 10),
+    ('color', 12),
+    ('mandelbrot', 22),
+    ('nebula', 22),
+    ('munafo', 10),
+    ('pattern', 8),    # picture-disc with a fractal as the full disc body
+    ('clear', 6),
+    ('picture', 5),
 ]
 
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'mandelbrot')
 NEBULA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'nebula')
+JULIA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'julia')
+MUNAFO_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'munafo')
+# The 9000×9000 gold archives live in the sibling `bongsweat` repo. This
+# path is only used by prerender_all() to regenerate the vinyl cache; at
+# runtime, lp reads from MUNAFO_CACHE_DIR (committed in this repo).
+MUNAFO_SOURCE_DIR = os.path.join(os.path.dirname(__file__), '..', '..',
+                                  'bongsweat', 'configs')
+
+# Julia label variants: (c_real, c_imag, zoom, max_iter, name)
+# Used as record labels (rendered into the center disc). Rainbow sinusoidal palette.
+JULIA_VARIANTS = [
+    (-0.74543,  0.11301, 1.35, 200, 'dendrite'),
+    (-0.7269,   0.1889,  1.35, 200, 'rabbit'),
+    (-0.8,      0.156,   1.35, 200, 'seahorse'),
+]
 
 # Pre-render resolution (radius) — large enough to scale down for any display.
 # Sized to cover a typical 1080p display at RECORD_SUPERSAMPLE=4 with minimal upscale.
@@ -647,8 +688,88 @@ def _render_mandelbrot_surface(variant, size):
     return result
 
 
+def _render_munafo_surface(variant, size):
+    """Load a locked Munafo deep-zoom snapshot and scale it to vinyl size.
+    The snapshot in munafo_work/configs/<name>.png is the source of truth;
+    we never re-run the perturbation engine here."""
+    config_name = variant[0]
+    src_path = os.path.join(MUNAFO_SOURCE_DIR, f'{config_name}.png')
+    d = size * 2
+    img = pygame.image.load(src_path).convert_alpha()
+    surf = pygame.transform.smoothscale(img, (d, d))
+    # The snapshot already has a disc-masked alpha (black outside the
+    # circle), but ensure the mask is clean at the output resolution.
+    mask = pygame.Surface((d, d), pygame.SRCALPHA)
+    pygame.draw.circle(mask, (255, 255, 255, 255), (size, size), size)
+    surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return surf
+
+
+def _render_julia_surface(variant, size):
+    """Render a Julia set disc. Each pixel = initial z, c is fixed.
+    Rainbow sinusoidal palette."""
+    cr, ci, zoom, max_iter, _name = variant
+    c = complex(cr, ci)
+
+    d = size * 2
+    sm = max(size // 2, 40)
+    d_sm = sm * 2
+    sc = sm
+    max_r_sq = (sm * 0.95) ** 2
+
+    py, px = np.mgrid[0:d_sm, 0:d_sm].astype(np.float64)
+    dx = px - sc
+    dy = py - sc
+    inside = dx * dx + dy * dy <= max_r_sq
+
+    z = (dx / sm / zoom) + 1j * (dy / sm / zoom)
+    iters = np.full(z.shape, max_iter, dtype=np.int32)
+    active = inside.copy()
+
+    for step in range(max_iter):
+        z = np.where(active, z * z + c, z)
+        escaped = active & (z.real * z.real + z.imag * z.imag > 4.0)
+        iters[escaped] = step + 1
+        active = active & ~escaped
+        if not active.any():
+            break
+
+    t = iters.astype(np.float64) / max_iter
+
+    # Rainbow sinusoidal palette
+    r_arr = (np.sin(t * 8.0) * 0.5 + 0.5) * 255
+    g_arr = (np.sin(t * 8.0 + 2.0) * 0.5 + 0.5) * 200
+    b_arr = (np.sin(t * 8.0 + 4.0) * 0.5 + 0.5) * 255
+
+    # Interior: dark purple
+    interior = iters == max_iter
+    r_arr = np.where(interior, 10, r_arr)
+    g_arr = np.where(interior, 5, g_arr)
+    b_arr = np.where(interior, 25, b_arr)
+
+    r_arr = np.where(inside, np.clip(r_arr, 0, 255), 0).astype(np.uint8)
+    g_arr = np.where(inside, np.clip(g_arr, 0, 255), 0).astype(np.uint8)
+    b_arr = np.where(inside, np.clip(b_arr, 0, 255), 0).astype(np.uint8)
+    a_arr = np.where(inside, 255, 0).astype(np.uint8)
+
+    rgba = np.stack([r_arr, g_arr, b_arr, a_arr], axis=-1).tobytes()
+    sm_surf = pygame.image.frombuffer(rgba, (d_sm, d_sm), 'RGBA').copy()
+
+    blur1 = d // 2
+    result = pygame.transform.smoothscale(sm_surf, (blur1, blur1))
+    result = pygame.transform.smoothscale(result, (d, d))
+    mask = pygame.Surface((d, d), pygame.SRCALPHA)
+    pygame.draw.circle(mask, (255, 255, 255, 255), (size, size), size)
+    result.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return result
+
+
 def prerender_all():
-    """Pre-render all mandelbrot and nebula variants to PNG cache. Run once on a fast machine."""
+    """Pre-render all mandelbrot, nebula, and munafo variants to PNG cache.
+    Run once on a fast machine. Munafo variants downsample from their
+    high-res (9000x9000) gold archives in munafo_work/configs/ — the deep
+    zoom detail is preserved because we shrink already-resolved pixels
+    rather than re-running the math at low resolution."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     for variant in MANDELBROT_VARIANTS:
         name = variant[4]
@@ -661,6 +782,23 @@ def prerender_all():
         print('done')
     print(f'cached {len(MANDELBROT_VARIANTS)} mandelbrot variants in {CACHE_DIR}')
 
+    if os.path.isdir(MUNAFO_SOURCE_DIR):
+        os.makedirs(MUNAFO_CACHE_DIR, exist_ok=True)
+        for variant in MUNAFO_VARIANTS:
+            config_name = variant[0]
+            path = os.path.join(MUNAFO_CACHE_DIR, f'{config_name}.png')
+            print(f'  downsampling munafo/{config_name} to {PRERENDER_SIZE}px radius...',
+                  end=' ', flush=True)
+            surf = _render_munafo_surface(variant, PRERENDER_SIZE)
+            pygame.image.save(surf, path)
+            print('done')
+        print(f'cached {len(MUNAFO_VARIANTS)} munafo variants in {MUNAFO_CACHE_DIR}')
+    else:
+        print(f'  skipping munafo prerender — gold archives not found at '
+              f'{MUNAFO_SOURCE_DIR}')
+        print(f'  (committed cache at {MUNAFO_CACHE_DIR} will still be used '
+              f'at runtime; clone the bongsweat repo as a sibling to regenerate)')
+
     os.makedirs(NEBULA_CACHE_DIR, exist_ok=True)
     for variant in NEBULA_VARIANTS:
         name = variant[2]
@@ -670,6 +808,18 @@ def prerender_all():
         pygame.image.save(surf, path)
         print('done')
     print(f'cached {len(NEBULA_VARIANTS)} nebula variants in {NEBULA_CACHE_DIR}')
+
+    # Julia labels — rendered smaller (~label size, not full record).
+    os.makedirs(JULIA_CACHE_DIR, exist_ok=True)
+    julia_size = 400
+    for variant in JULIA_VARIANTS:
+        name = variant[4]
+        path = os.path.join(JULIA_CACHE_DIR, f'{name}.png')
+        print(f'  rendering julia/{name} at {julia_size}px radius...', end=' ', flush=True)
+        surf = _render_julia_surface(variant, julia_size)
+        pygame.image.save(surf, path)
+        print('done')
+    print(f'cached {len(JULIA_VARIANTS)} julia variants in {JULIA_CACHE_DIR}')
 
 
 def _pick_vinyl_style(album_path, override='random'):
@@ -696,6 +846,10 @@ def _pick_vinyl_style(album_path, override='random'):
         style_type = 'mandelbrot'
     elif override.startswith('nebula'):
         style_type = 'nebula'
+    elif override.startswith('munafo'):
+        style_type = 'munafo'
+    elif override.startswith('pattern'):
+        style_type = 'pattern'
     else:
         style_type = 'black'
 
@@ -734,6 +888,62 @@ def _pick_vinyl_style(album_path, override='random'):
                     return {'type': 'nebula', 'variant': v}
         variant = rng.choice(NEBULA_VARIANTS)
         return {'type': 'nebula', 'variant': variant}
+    elif style_type == 'munafo':
+        # Accept "munafo", "munafo-deep5_v1", or "munafo-deep5".
+        if override.startswith('munafo-'):
+            spec = override[len('munafo-'):]
+            for v in MUNAFO_VARIANTS:
+                if v[0] == spec or v[1] == f'munafo-{spec}' or v[0].startswith(spec):
+                    return {'type': 'munafo', 'variant': v}
+        variant = rng.choice(MUNAFO_VARIANTS)
+        return {'type': 'munafo', 'variant': variant}
+    elif style_type == 'pattern':
+        # Picture-disc with a fractal body. Override forms:
+        #   pattern                       — random fractal
+        #   pattern-mandelbrot            — random mandelbrot
+        #   pattern-mandelbrot-X-Y        — specific mandelbrot
+        #   pattern-nebula / -nebula-X    — nebula
+        #   pattern-munafo  / -munafo-X   — munafo
+        sub_type = None
+        sub_variant = None
+        if override == 'pattern':
+            sub_type = rng.choice(['mandelbrot', 'nebula', 'munafo'])
+        elif override.startswith('pattern-mandelbrot'):
+            sub_type = 'mandelbrot'
+            spec = override[len('pattern-mandelbrot'):].lstrip('-')
+            if spec:
+                for v in MANDELBROT_VARIANTS:
+                    if f'{v[4]}-{v[5]}' == spec:
+                        sub_variant = v
+                        break
+        elif override.startswith('pattern-nebula'):
+            sub_type = 'nebula'
+            spec = override[len('pattern-nebula'):].lstrip('-')
+            if spec:
+                for v in NEBULA_VARIANTS:
+                    if v[2] == spec:
+                        sub_variant = v
+                        break
+        elif override.startswith('pattern-munafo'):
+            sub_type = 'munafo'
+            spec = override[len('pattern-munafo'):].lstrip('-')
+            if spec:
+                for v in MUNAFO_VARIANTS:
+                    if v[0] == spec or v[0].startswith(spec):
+                        sub_variant = v
+                        break
+        else:
+            sub_type = rng.choice(['mandelbrot', 'nebula', 'munafo'])
+
+        if sub_variant is None:
+            if sub_type == 'mandelbrot':
+                sub_variant = rng.choice(MANDELBROT_VARIANTS)
+            elif sub_type == 'nebula':
+                sub_variant = rng.choice(NEBULA_VARIANTS)
+            elif sub_type == 'munafo':
+                sub_variant = rng.choice(MUNAFO_VARIANTS)
+        return {'type': 'pattern',
+                'sub': {'type': sub_type, 'variant': sub_variant}}
     elif style_type == 'clear':
         return {'type': 'clear'}
     elif style_type == 'picture':
@@ -771,6 +981,14 @@ class Display:
         self.window = None
         self.renderer = None
 
+        # Screenshot plumbing — request_screenshot() (called from API thread)
+        # sets the event; the pygame loop captures the next frame and stores
+        # PNG bytes for the requester to read.
+        self._screenshot_event = threading.Event()
+        self._screenshot_lock = threading.Lock()
+        self._screenshot_data = None
+        self._record_rect = None  # last-rendered record bounds, for screenshot blur
+
         player.on('play_start', self._mark_dirty)
         player.on('track_change', self._mark_dirty)
         player.on('album_end', self._mark_dirty)
@@ -778,6 +996,70 @@ class Display:
 
     def _mark_dirty(self):
         self._dirty = True
+
+    def request_screenshot(self, timeout=8.0):
+        """Capture the current frame as PNG bytes. Thread-safe; intended to be
+        called from the API thread. Returns bytes on success, None on timeout."""
+        print(f'[share] request_screenshot called', flush=True)
+        with self._screenshot_lock:
+            self._screenshot_data = None
+        self._dirty = True  # force a re-render so we capture the latest state
+        self._screenshot_event.set()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._screenshot_lock:
+                if self._screenshot_data is not None:
+                    n = len(self._screenshot_data)
+                    print(f'[share] request_screenshot got {n} bytes', flush=True)
+                    return self._screenshot_data or None
+            time.sleep(0.05)
+        print(f'[share] request_screenshot TIMED OUT', flush=True)
+        return None
+
+    def _capture_screenshot_if_requested(self):
+        """Called from the pygame loop, right after present()."""
+        if not self._screenshot_event.is_set():
+            return
+        print(f'[share] _capture_screenshot_if_requested firing', flush=True)
+        self._screenshot_event.clear()
+        try:
+            surf = self.renderer.to_surface()
+            print(f'[share] to_surface size={surf.get_size()}', flush=True)
+            if self._record_rect is not None:
+                rect = pygame.Rect(self._record_rect).clip(surf.get_rect())
+                print(f'[share] record_rect={self._record_rect}, clipped={rect}', flush=True)
+                if rect.width > 0 and rect.height > 0:
+                    sub = surf.subsurface(rect).copy()
+                    print(f'[share] subsurface ok, size={sub.get_size()}', flush=True)
+                    if hasattr(pygame.transform, 'gaussian_blur'):
+                        sub = pygame.transform.gaussian_blur(sub, 1)
+                        print(f'[share] gaussian_blur ok', flush=True)
+                    else:
+                        sw, sh = sub.get_size()
+                        small = pygame.transform.smoothscale(sub, (sw * 3 // 4, sh * 3 // 4))
+                        sub = pygame.transform.smoothscale(small, (sw, sh))
+                        print(f'[share] smoothscale-blur ok', flush=True)
+                    surf.blit(sub, rect.topleft)
+                    print(f'[share] blit back ok', flush=True)
+            else:
+                print(f'[share] no record_rect set', flush=True)
+            # Downscale (or scale-to-fit) 1920×1080. PNG encoding stays small
+            # enough and the saved image matches typical TV/display output.
+            target_w, target_h = 1920, 1080
+            if surf.get_size() != (target_w, target_h):
+                surf = pygame.transform.smoothscale(surf, (target_w, target_h))
+                print(f'[share] scaled to {target_w}x{target_h}', flush=True)
+            buf = io.BytesIO()
+            pygame.image.save(surf, buf, 'PNG')
+            data = buf.getvalue()
+            print(f'[share] PNG encoded: {len(data)} bytes', flush=True)
+        except Exception as e:
+            import traceback
+            print(f'[share] EXCEPTION: {type(e).__name__}: {e}', flush=True)
+            traceback.print_exc()
+            data = b''
+        with self._screenshot_lock:
+            self._screenshot_data = data
 
     def run(self):
         # Tell SDL to use linear filtering when sampling textures. Without this,
@@ -835,6 +1117,7 @@ class Display:
                 self._dirty = False
                 self._render()
                 self.renderer.present()
+                self._capture_screenshot_if_requested()
 
             self.clock.tick(30)
 
@@ -887,6 +1170,66 @@ class Display:
         self._label_art_path = art_path
         self._label_art = self._get_circular_art(art_path, label_r)
         return self._label_art
+
+    def _get_julia_label(self, name, label_r):
+        """Load a pre-rendered Julia disc and scale to the label radius.
+        Cached on the Display instance by (name, label_r)."""
+        key = (name, label_r)
+        cached = getattr(self, '_julia_label_cache', {})
+        if key in cached:
+            return cached[key]
+        path = os.path.join(JULIA_CACHE_DIR, f'{name}.png')
+        if not os.path.isfile(path):
+            return None
+        try:
+            img = pygame.image.load(path)
+        except Exception:
+            return None
+        d = label_r * 2
+        scaled = pygame.transform.smoothscale(img, (d, d))
+        # Ensure RGBA so alpha is preserved on later blits.
+        target = pygame.Surface((d, d), pygame.SRCALPHA)
+        target.blit(scaled, (0, 0))
+        cached[key] = target
+        self._julia_label_cache = cached
+        return target
+
+    def _get_pattern_label(self, label_setting, label_r):
+        """Render a fractal cache (mandelbrot / nebula / munafo) as a label.
+        `label_setting` is like 'mandelbrot-seahorse-purple', 'nebula-galaxy',
+        or 'munafo-deep5_v1'. Returns a circular RGBA surface or None."""
+        key = (label_setting, label_r)
+        cached = getattr(self, '_pattern_label_cache', {})
+        if key in cached:
+            return cached[key]
+
+        if label_setting.startswith('mandelbrot-'):
+            path = os.path.join(CACHE_DIR, f'{label_setting[len("mandelbrot-"):]}.png')
+        elif label_setting.startswith('nebula-'):
+            path = os.path.join(NEBULA_CACHE_DIR, f'{label_setting[len("nebula-"):]}.png')
+        elif label_setting.startswith('munafo-'):
+            path = os.path.join(MUNAFO_CACHE_DIR, f'{label_setting[len("munafo-"):]}.png')
+        else:
+            return None
+
+        if not os.path.isfile(path):
+            return None
+        try:
+            img = pygame.image.load(path)
+        except Exception:
+            return None
+        d = label_r * 2
+        scaled = pygame.transform.smoothscale(img, (d, d))
+        # Re-mask to the label radius — source PNGs are masked to the full
+        # vinyl disc, which is larger than the label.
+        target = pygame.Surface((d, d), pygame.SRCALPHA)
+        target.blit(scaled, (0, 0))
+        mask = pygame.Surface((d, d), pygame.SRCALPHA)
+        pygame.draw.circle(mask, (255, 255, 255, 255), (label_r, label_r), label_r)
+        target.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        cached[key] = target
+        self._pattern_label_cache = cached
+        return target
 
     @staticmethod
     def _draw_fake_label_text(surf, cx, cy, label_r, accent_c):
@@ -957,9 +1300,7 @@ class Display:
             else:
                 self._draw_black_vinyl(surf, size, center)
         elif style_type == 'clear':
-            pygame.draw.circle(surf, (255, 255, 255, 12), center, size)
-            pygame.draw.circle(surf, (255, 255, 255, 40), center, size, 2)
-            pygame.draw.circle(surf, (255, 255, 255, 25), center, size - 1, 1)
+            self._draw_clear_vinyl(surf, size, center)
         elif style_type == 'color':
             base = VINYL_COLORS.get(style.get('color'), VINYL_BLACK[0])
             pygame.draw.circle(surf, base, center, size)
@@ -969,11 +1310,28 @@ class Display:
         elif style_type == 'nebula':
             variant = style['variant']
             self._draw_nebula_vinyl(surf, size, center, variant)
+        elif style_type == 'munafo':
+            variant = style['variant']
+            self._draw_munafo_vinyl(surf, size, center, variant)
+        elif style_type == 'pattern':
+            # Pattern picture-disc: fractal as the full disc body, no label.
+            sub = style.get('sub') or {}
+            sub_type = sub.get('type')
+            if sub_type == 'mandelbrot':
+                self._draw_mandelbrot_vinyl(surf, size, center, sub['variant'])
+            elif sub_type == 'nebula':
+                self._draw_nebula_vinyl(surf, size, center, sub['variant'])
+            elif sub_type == 'munafo':
+                self._draw_munafo_vinyl(surf, size, center, sub['variant'])
+            else:
+                self._draw_black_vinyl(surf, size, center)
         else:
             self._draw_black_vinyl(surf, size, center)
 
-        # Label — album art, colored, or fallback (skip for picture disc)
-        if style_type != 'picture':
+        # Label — album art, colored, fractal, or fallback. Skip entirely
+        # for picture-disc styles ('picture' = album art disc, 'pattern' =
+        # fractal disc) since those use the body all the way through.
+        if style_type not in ('picture', 'pattern'):
             label_r = int(size * LABEL_RADIUS)
             label_setting = self.player.vinyl_label
 
@@ -989,6 +1347,23 @@ class Display:
                 main_c, accent_c = LABEL_COLORS.get(color_name, (VINYL_LABEL, VINYL_LABEL_DARK))
                 pygame.draw.circle(surf, main_c, center, label_r)
                 self._draw_fake_label_text(surf, size, size, label_r, accent_c)
+            elif label_setting.startswith('julia-'):
+                name = label_setting[len('julia-'):]
+                jl = self._get_julia_label(name, label_r)
+                if jl:
+                    surf.blit(jl, (size - label_r, size - label_r))
+                else:
+                    pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
+                    self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
+            elif (label_setting.startswith('mandelbrot-')
+                  or label_setting.startswith('nebula-')
+                  or label_setting.startswith('munafo-')):
+                fl = self._get_pattern_label(label_setting, label_r)
+                if fl:
+                    surf.blit(fl, (size - label_r, size - label_r))
+                else:
+                    pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
+                    self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
             else:
                 pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
                 self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
@@ -1026,7 +1401,10 @@ class Display:
         blend_mode = 'blend'
 
         if style_type == 'clear':
+            # Bright body — additive shine makes grooves read as highlights
+            # catching the light, not as washed-out haze.
             overlay_c = CLEAR_GROOVE_COLORS[0]
+            blend_mode = 'add'
         elif style_type == 'color':
             overlay_c = VINYL_GROOVE_COLORS.get(
                 style.get('color', ''), ((0, 0, 0, 28), None))[0]
@@ -1038,8 +1416,25 @@ class Display:
             # Darker bands in the music zone — grooves cast deeper shadows
             # than the smooth lead-in flats. Normal alpha blend.
             overlay_c = (0, 0, 0, 25)
+        elif style_type == 'munafo':
+            variant = style.get('variant')
+            cfg_name = variant[0] if variant else None
+            overlay_c = MUNAFO_GROOVE_COLORS.get(cfg_name, ((0, 0, 0, 30), None))[0]
+            blend_mode = 'add' if overlay_c[0] > 128 else 'blend'
+        elif style_type == 'pattern':
+            # Inherit groove behavior from the underlying fractal type.
+            sub = style.get('sub') or {}
+            sub_type = sub.get('type')
+            if sub_type == 'munafo':
+                variant = sub.get('variant')
+                cfg_name = variant[0] if variant else None
+                overlay_c = MUNAFO_GROOVE_COLORS.get(cfg_name, ((0, 0, 0, 30), None))[0]
+                blend_mode = 'add' if overlay_c[0] > 128 else 'blend'
+            else:
+                overlay_c = (255, 255, 255, 45)
+                blend_mode = 'add'
         elif style_type in ('mandelbrot', 'nebula', 'picture'):
-            overlay_c = (255, 255, 255, 8)
+            overlay_c = (255, 255, 255, 45)
             blend_mode = 'add'
 
         if overlay_c is not None:
@@ -1198,6 +1593,142 @@ class Display:
         base, _, _ = VINYL_BLACK
         pygame.draw.circle(surf, base, center, size)
 
+    # Tunable knobs for the clear-vinyl look. Each parameter is independent
+    # so we can dial them one at a time.
+    _CLEAR_PARAMS = dict(
+        # --- Platter / disc body. We can't lighten the player UI bg, so
+        # the disc itself carries the silver/white weight. Near-opaque
+        # silver so it reads as "clear vinyl on a light surface" against
+        # any background.
+        platter_color        = (210, 215, 220),  # silver-white
+        platter_alpha        = 0.92,
+        body_alpha           = 0.03,
+        # --- Specular streak (vertical window-reflection column).
+        # SOFT and WIDE — reference shows a broad luminous column, not a
+        # hard narrow band.
+        streak_x_frac        = -0.05,
+        streak_angle_deg     = -4.0,
+        streak_core_width    = 0.13,   # broad bright core
+        streak_core_alpha    = 0.45,   # lower since base is already bright
+        streak_halo_width    = 0.45,   # very wide soft halo
+        streak_halo_alpha    = 0.35,
+        streak_top_fade      = 0.0,
+        # --- Concentric groove striations across the disc face ---
+        striation_alpha      = 0.30,
+        striation_freq       = 0.45,
+        # --- Rainbow refraction (more visible now that platter is bright) ---
+        rainbow_strength     = 0.80,
+        # --- Rim ---
+        rim_alpha            = 0.55,
+        rim_width_px         = 2.5,
+    )
+
+    def _draw_clear_vinyl(self, surf, size, center, **overrides):
+        """Draw a clear-vinyl base disc with platter + shimmer.
+
+        Layers (back-to-front):
+          1. Silver platter — gives the disc weight against the dark UI
+             background so the clear vinyl reads as "sitting on a
+             turntable" rather than "ghost".
+          2. Body — slight overall brightness on top of the platter.
+          3. Specular streak — bright Gaussian CORE + wider HALO, slightly
+             tilted, fading top-to-bottom (light from above).
+          4. Groove shimmer — subtle concentric brighter bands in the
+             music zone where light catches groove ridges.
+          5. Rim — bright edge highlight.
+
+        Pass keyword overrides to tweak per-call:
+            self._draw_clear_vinyl(surf, size, center, streak_core_alpha=0.9)
+        """
+        p = {**self._CLEAR_PARAMS, **overrides}
+
+        d = size * 2
+        cx, cy = d // 2, d // 2
+
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+        in_disc = np.clip(size - r + 0.5, 0.0, 1.0)
+
+        # 1+2. Platter (silver base) + faint body on top, as a single layer.
+        platter_a = in_disc * p['platter_alpha']
+        body_a = in_disc * p['body_alpha']
+
+        pc = np.array(p['platter_color'], dtype=np.float32)
+        # White contributions on top: streak + shimmer + rim
+        # 3. Streak (rotated)
+        ang = np.deg2rad(p['streak_angle_deg'])
+        u = (dx - size * p['streak_x_frac']) * np.cos(ang) - dy * np.sin(ang)
+        core_sigma = size * p['streak_core_width']
+        halo_sigma = size * p['streak_halo_width']
+        core = np.exp(-(u / core_sigma) ** 2) * p['streak_core_alpha']
+        halo = np.exp(-(u / halo_sigma) ** 2) * p['streak_halo_alpha']
+        vfade = np.clip((size - dy) / (2 * size), 0.0, 1.0) ** p['streak_top_fade']
+        streak = (core + halo) * vfade * in_disc
+
+        # 4. Concentric groove striations — visible across the whole disc
+        # face (not just the music zone), modulating sinusoidally on r.
+        # Strongest in the mid-radius where light has the most surface area
+        # to catch, falling off near center and edge.
+        radial_env = np.clip(in_disc, 0.0, 1.0) * np.clip(r / size, 0.0, 1.0)
+        striations = (0.5 + 0.5 * np.sin(r * p['striation_freq'])) * radial_env * p['striation_alpha']
+
+        # 5. Rim
+        rim = np.clip(1.0 - np.abs(r - (size - 1.5)) / p['rim_width_px'],
+                      0.0, 1.0) * p['rim_alpha']
+
+        white_a = np.clip(body_a + streak + striations + rim, 0.0, 1.0)
+
+        # --- Rainbow refraction tints ---
+        # Where light catches the grooves it doesn't read as pure white —
+        # plastic refracts wavelengths slightly differently, giving an
+        # iridescent shimmer. We modulate a HSV hue with r and apply it
+        # at low saturation, scaled to the striation strength so it only
+        # shows where light is actually catching.
+        hue = (r * p['striation_freq'] * 0.10) % 1.0
+        # HSV → RGB with low saturation. Cheap inline conversion:
+        i = (hue * 6.0).astype(np.int32) % 6
+        f = hue * 6.0 - (hue * 6.0).astype(np.int32)
+        # Saturated rainbow channels (sat=1, val=1).
+        rb_r = np.where(i == 0, 1.0,
+              np.where(i == 1, 1 - f,
+              np.where(i == 2, 0.0,
+              np.where(i == 3, 0.0,
+              np.where(i == 4, f, 1.0)))))
+        rb_g = np.where(i == 0, f,
+              np.where(i == 1, 1.0,
+              np.where(i == 2, 1.0,
+              np.where(i == 3, 1 - f,
+              np.where(i == 4, 0.0, 0.0)))))
+        rb_b = np.where(i == 0, 0.0,
+              np.where(i == 1, 0.0,
+              np.where(i == 2, f,
+              np.where(i == 3, 1.0,
+              np.where(i == 4, 1.0, 1 - f)))))
+        # Iridescence weight — only where the striations are catching light.
+        irid_w = striations * p['rainbow_strength']
+        # Mix the rainbow color into the white-highlight color.
+        hi_r = 255.0 * (1 - irid_w) + (rb_r * 255.0) * irid_w
+        hi_g = 255.0 * (1 - irid_w) + (rb_g * 255.0) * irid_w
+        hi_b = 255.0 * (1 - irid_w) + (rb_b * 255.0) * irid_w
+
+        # Composite — platter base lightened toward (white/iridescent) by
+        # the white_a alpha.
+        r_arr = pc[0] * (1.0 - white_a) + hi_r * white_a
+        g_arr = pc[1] * (1.0 - white_a) + hi_g * white_a
+        b_arr = pc[2] * (1.0 - white_a) + hi_b * white_a
+        alpha = np.maximum(platter_a, white_a) * 255.0
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = np.clip(r_arr, 0, 255).astype(np.uint8)
+        rgba[..., 1] = np.clip(g_arr, 0, 255).astype(np.uint8)
+        rgba[..., 2] = np.clip(b_arr, 0, 255).astype(np.uint8)
+        rgba[..., 3] = np.clip(alpha, 0, 255).astype(np.uint8)
+
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+
     def _draw_track_marks(self, surf, size, center, color, boundaries, album_dur, ss_factor=None):
         """Draw track boundary rings at album track positions, with subpixel AA.
 
@@ -1259,6 +1790,22 @@ class Display:
 
         surf.blit(fractal, (0, 0))
 
+    def _draw_munafo_vinyl(self, surf, size, center, variant):
+        """Draw a vinyl with a Munafo deep-zoom pattern. Uses the 1600x1600
+        pre-rendered cache; falls back to downsampling the 9000x9000 gold
+        archive on the fly if the cache is missing (slow first frame)."""
+        config_name = variant[0]
+        d = size * 2
+        cache_path = os.path.join(MUNAFO_CACHE_DIR, f'{config_name}.png')
+
+        if os.path.isfile(cache_path):
+            cached = pygame.image.load(cache_path)
+            fractal = pygame.transform.smoothscale(cached, (d, d))
+        else:
+            fractal = _render_munafo_surface(variant, size)
+
+        surf.blit(fractal, (0, 0))
+
     def _draw_nebula_vinyl(self, surf, size, center, variant):
         """Draw a vinyl with a nebula pattern. Uses pre-rendered cache if available."""
         name = variant[2]
@@ -1283,6 +1830,7 @@ class Display:
             self._render_playing(status)
 
     def _render_idle(self):
+        self._record_rect = None
         self.renderer.draw_color = DARK_BG
         self.renderer.clear()
 
@@ -1387,13 +1935,14 @@ class Display:
             self._grooves_texture_key = grooves_key
             grooves_surf, blend_mode = self._build_grooves_overlay(record_size, style, boundaries, album_dur)
             self._grooves_texture = sdl2_video.Texture.from_surface(self.renderer, grooves_surf)
-            # SDL_BLENDMODE_ADD = 2, _BLEND = 1
-            self._grooves_texture.blend_mode = 2 if blend_mode == 'add' else 1
+            self._grooves_texture.blend_mode = (
+                pygame.BLENDMODE_ADD if blend_mode == 'add' else pygame.BLENDMODE_BLEND)
 
         rec_cx = meta_x + meta_width // 2
         rec_cy = y + record_size + int(self.height * 0.01)
         d = record_size * 2
         rec_dst = pygame.Rect(rec_cx - record_size, rec_cy - record_size, d, d)
+        self._record_rect = rec_dst
         self._record_texture.draw(dstrect=rec_dst, angle=self._record_angle)
         self._grooves_texture.draw(dstrect=rec_dst, angle=self._record_angle)
 

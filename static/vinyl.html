@@ -268,6 +268,10 @@
     }
 
     function previewUrl(id) {
+      // 'pattern-X' shares preview thumbnails with the underlying fractal.
+      if (id.startsWith('pattern-')) {
+        id = id.slice('pattern-'.length);
+      }
       // Strip prefix to get cache filename
       if (id.startsWith('mandelbrot-')) {
         const name = id.slice('mandelbrot-'.length);
@@ -275,6 +279,10 @@
       }
       if (id.startsWith('nebula-')) {
         const name = id.slice('nebula-'.length);
+        return `/api/vinyl/preview/${name}`;
+      }
+      if (id.startsWith('munafo-')) {
+        const name = id.slice('munafo-'.length);
         return `/api/vinyl/preview/${name}`;
       }
       return null;
@@ -357,8 +365,22 @@
       thumb.className = 'vinyl-thumb';
 
       const cssColor = labelColorMap[opt.id];
+      const fractalUrl = previewUrl(opt.id);
       if (cssColor) {
         thumb.style.background = cssColor;
+      } else if (opt.id.startsWith('julia-')) {
+        const img = document.createElement('img');
+        img.src = '/api/vinyl/preview/' + encodeURIComponent(opt.id);
+        img.className = 'vinyl-thumb-img';
+        img.loading = 'lazy';
+        thumb.appendChild(img);
+      } else if (fractalUrl) {
+        // Mandelbrot / nebula / munafo labels reuse the vinyl preview cache.
+        const img = document.createElement('img');
+        img.src = fractalUrl;
+        img.className = 'vinyl-thumb-img';
+        img.loading = 'lazy';
+        thumb.appendChild(img);
       } else {
         const ph = document.createElement('div');
         ph.className = 'vinyl-thumb-placeholder';
@@ -584,6 +606,8 @@
         color: {title: 'Colored', items: []},
         mandelbrot: {title: 'Mandelbrot', items: []},
         nebula: {title: 'Nebula', items: []},
+        munafo: {title: 'Munafo Deep-Zoom', items: []},
+        pattern: {title: 'Pattern Picture Disc', items: []},
       };
 
       for (const opt of options) {

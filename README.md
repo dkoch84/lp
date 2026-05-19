@@ -2,15 +2,29 @@
 
 ![DEATH](screenshots/README-DEATH.png)
 
-### Stop changing tracks, stop switching playlists, stop making playlists. Good bands already make 'em, they call them Albums. 
+### Stop changing tracks, stop switching playlists, stop making playlists. Good bands already make 'em, they call them albums. 
 
-A music player that plays albums like records. Pygame renders a spinning vinyl on your display while a web UI lets you browse and control playback from your phone.
+A music player that plays albums like a record player plays albums. Pygame renders a spinning vinyl and the album art on your display while a web UI lets you browse and control playback from your phone.
 
-Grew up on Winamp. Simple player, but I still want my own style.
+Touch-friendly web UI. Browse your library, tap an album, melt.
 
-Touch-friendly web UI. Browse your library, tap an album, go.
+LastFM scrobbling so you know how long you were faded last night.
 
-LastFM scrobbling.
+Take screenshots, the next 3 were taken with the new feature. Also improved is the look of the grooves on all the patterns.  
+
+![alt text](screenshots/image.png)
+
+![Clear](screenshots/lp-1779231276.png)
+
+Better clear vinyl rendering with iridescent refraction and platter shimmer.
+
+![Munafo1](screenshots/lp-1779231189.png)
+
+Ultra Deep-zoom Mandelbrot vinyls
+
+![Fractal Discs](screenshots/lp-1779231154.png)
+
+Use any fractal pattern as the full vinyl, just like Picture Discs
 
 ![Library](screenshots/README-library.png)
 
@@ -91,3 +105,21 @@ static/          Web UI
 ```
 
 ### Just play the damn record.
+
+## Vinyl styles
+
+Random per album: black, colored, clear (with platter shimmer + iridescent
+refraction), picture disc, pattern picture disc (fractal as the full
+disc), and three fractal families:
+
+- **Mandelbrot** — classic escape-time fractal at named zooms (seahorse,
+  elephant, spiral, etc.) across a dozen color schemes.
+- **Nebula** — value-noise gas clouds in 19 color variants.
+- **Munafo Deep-Zoom** — `2.7×10⁻²²` deep-zoom Mandelbrot renders. The
+  9000×9000 gold archives + the GPU/perturbation engine that produced
+  them live in a separate repo: **[bongsweat](../bongsweat/)**. The
+  vinyl-size cache (`lp/cache/munafo/*.png`, ~14 MB) is committed here
+  and consumed at runtime by `_draw_munafo_vinyl()` in `lp/display.py`.
+
+Center labels follow the same families — any fractal variant can be
+chosen as the label.

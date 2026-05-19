@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 
@@ -30,8 +30,24 @@ class LastfmToggleRequest(BaseModel):
     enabled: bool
 
 
-def create_app(player, library, static_dir, scrobbler=None):
+def create_app(player, library, static_dir, scrobbler=None, display=None):
     app = FastAPI(title="lp")
+
+    @app.post("/api/share")
+    def share():
+        """Capture the current display as a PNG and return it for download."""
+        if display is None:
+            raise HTTPException(503, "display not available")
+        data = display.request_screenshot()
+        if not data:
+            raise HTTPException(503, "screenshot capture failed or timed out")
+        import time as _t
+        filename = f"lp-{int(_t.time())}.png"
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     # --- Library browsing ---
 
@@ -117,14 +133,26 @@ def create_app(player, library, static_dir, scrobbler=None):
     @app.post("/api/settings/vinyl")
     def set_vinyl_style(req: VinylStyleRequest):
         from lp.display import (MANDELBROT_VARIANTS, MANDELBROT_COLORS,
-                                MANDELBROT_ZOOMS, NEBULA_VARIANTS, VINYL_COLORS)
+                                MANDELBROT_ZOOMS, NEBULA_VARIANTS,
+                                MUNAFO_VARIANTS, VINYL_COLORS)
         mandelbrot_combo = ['mandelbrot-' + v[4] + '-' + v[5] for v in MANDELBROT_VARIANTS]
         mandelbrot_colors = ['mandelbrot-' + c for c in MANDELBROT_COLORS]
         mandelbrot_zooms = ['mandelbrot-' + z[4] for z in MANDELBROT_ZOOMS]
         nebula_names = ['nebula-' + v[2] for v in NEBULA_VARIANTS]
+        munafo_names = ['munafo-' + v[0] for v in MUNAFO_VARIANTS]
         color_names = ['color-' + c for c in VINYL_COLORS]
-        valid = (['random', 'black', 'clear', 'picture', 'mandelbrot', 'nebula', 'color']
-                 + color_names + mandelbrot_combo + mandelbrot_colors + mandelbrot_zooms + nebula_names)
+        # Pattern picture-disc: same selectors as the fractal styles, just
+        # with a 'pattern-' prefix and no label drawn.
+        pattern_basic = ['pattern', 'pattern-mandelbrot', 'pattern-nebula',
+                         'pattern-munafo']
+        pattern_combo = (['pattern-' + s for s in mandelbrot_combo]
+                         + ['pattern-' + s for s in nebula_names]
+                         + ['pattern-' + s for s in munafo_names])
+        valid = (['random', 'black', 'clear', 'picture',
+                  'mandelbrot', 'nebula', 'munafo', 'color']
+                 + color_names + mandelbrot_combo + mandelbrot_colors
+                 + mandelbrot_zooms + nebula_names + munafo_names
+                 + pattern_basic + pattern_combo)
         if req.style not in valid:
             raise HTTPException(400, f"Invalid style. Choose from: {', '.join(valid)}")
         player.vinyl_style = req.style
@@ -133,7 +161,8 @@ def create_app(player, library, static_dir, scrobbler=None):
     @app.get("/api/settings/vinyl/options")
     def get_vinyl_options():
         from lp.display import (MANDELBROT_VARIANTS, MANDELBROT_COLORS,
-                                MANDELBROT_ZOOMS, NEBULA_VARIANTS, VINYL_COLORS)
+                                MANDELBROT_ZOOMS, NEBULA_VARIANTS,
+                                MUNAFO_VARIANTS, VINYL_COLORS)
         mandelbrot_combo = [{'id': 'mandelbrot-' + v[4] + '-' + v[5],
                              'label': v[4].replace('-', ' ').title() + ' ' + v[5].title(),
                              'category': 'mandelbrot'}
@@ -142,32 +171,81 @@ def create_app(player, library, static_dir, scrobbler=None):
                          'label': v[2].replace('-', ' ').title(),
                          'category': 'nebula'}
                         for v in NEBULA_VARIANTS]
+        munafo_items = [{'id': 'munafo-' + v[0],
+                         'label': v[2] if len(v) > 2 else v[0],
+                         'category': 'munafo'}
+                        for v in MUNAFO_VARIANTS]
         color_items = [{'id': 'color-' + name,
                         'label': name.replace('-', ' ').title(),
                         'category': 'color'}
                        for name in VINYL_COLORS]
+        pattern_basic = [
+            {'id': 'pattern', 'label': 'Random Pattern Disc', 'category': 'pattern'},
+            {'id': 'pattern-mandelbrot', 'label': 'Random Mandelbrot Pattern', 'category': 'pattern'},
+            {'id': 'pattern-nebula', 'label': 'Random Nebula Pattern', 'category': 'pattern'},
+            {'id': 'pattern-munafo', 'label': 'Random Munafo Pattern', 'category': 'pattern'},
+        ]
+        pattern_mandelbrot = [{'id': 'pattern-mandelbrot-' + v[4] + '-' + v[5],
+                               'label': v[4].replace('-', ' ').title() + ' ' + v[5].title(),
+                               'category': 'pattern'}
+                              for v in MANDELBROT_VARIANTS]
+        pattern_nebula = [{'id': 'pattern-nebula-' + v[2],
+                           'label': v[2].replace('-', ' ').title(),
+                           'category': 'pattern'}
+                          for v in NEBULA_VARIANTS]
+        pattern_munafo = [{'id': 'pattern-munafo-' + v[0],
+                           'label': (v[2] if len(v) > 2 else v[0]),
+                           'category': 'pattern'}
+                          for v in MUNAFO_VARIANTS]
         basic = [
             {'id': 'random', 'label': 'Random', 'category': 'basic'},
             {'id': 'black', 'label': 'Black', 'category': 'basic'},
             {'id': 'clear', 'label': 'Clear', 'category': 'basic'},
-            {'id': 'picture', 'label': 'Picture Disc', 'category': 'basic'},
+            {'id': 'picture', 'label': 'Album Art', 'category': 'basic'},
             {'id': 'color', 'label': 'Random Color', 'category': 'basic'},
             {'id': 'mandelbrot', 'label': 'Random Mandelbrot', 'category': 'basic'},
             {'id': 'nebula', 'label': 'Random Nebula', 'category': 'basic'},
+            {'id': 'munafo', 'label': 'Random Munafo Deep-Zoom', 'category': 'basic'},
         ]
-        return {'options': basic + color_items + mandelbrot_combo + nebula_items}
+        return {'options': (basic + color_items
+                            + mandelbrot_combo + nebula_items + munafo_items
+                            + pattern_basic + pattern_mandelbrot
+                            + pattern_nebula + pattern_munafo)}
 
     @app.get("/api/vinyl/preview/{style:path}")
     def vinyl_preview(style: str):
-        from lp.display import CACHE_DIR, NEBULA_CACHE_DIR
+        from lp.display import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,
+                                MUNAFO_CACHE_DIR)
+        # Vinyl previews are content-addressable by style id and effectively
+        # never change once cached, so let the browser hold onto them for a
+        # year. New variants get new ids; cached previews are stable.
+        headers = {'Cache-Control': 'public, max-age=31536000, immutable'}
+
+        def _serve(path):
+            return FileResponse(path, media_type='image/png', headers=headers)
+
+        # Julia previews come in as "julia-dendrite" etc — strip the prefix.
+        if style.startswith('julia-'):
+            jpath = os.path.join(JULIA_CACHE_DIR, f'{style[len("julia-"):]}.png')
+            if os.path.isfile(jpath):
+                return _serve(jpath)
+        # Munafo previews come in as "munafo-deep5_v1" etc.
+        if style.startswith('munafo-'):
+            mpath = os.path.join(MUNAFO_CACHE_DIR, f'{style[len("munafo-"):]}.png')
+            if os.path.isfile(mpath):
+                return _serve(mpath)
         # Try mandelbrot cache: style is "seahorse-purple" etc
         path = os.path.join(CACHE_DIR, f'{style}.png')
         if os.path.isfile(path):
-            return FileResponse(path, media_type='image/png')
+            return _serve(path)
         # Try nebula cache: style is "lava-lamp" etc
         path = os.path.join(NEBULA_CACHE_DIR, f'{style}.png')
         if os.path.isfile(path):
-            return FileResponse(path, media_type='image/png')
+            return _serve(path)
+        # Try munafo cache: style is "deep5_v1" etc (UI strips the prefix)
+        path = os.path.join(MUNAFO_CACHE_DIR, f'{style}.png')
+        if os.path.isfile(path):
+            return _serve(path)
         raise HTTPException(404, "No preview available")
 
     # --- Label settings ---
@@ -178,8 +256,13 @@ def create_app(player, library, static_dir, scrobbler=None):
 
     @app.post("/api/settings/label")
     def set_label(req: LabelRequest):
-        from lp.display import LABEL_COLORS
-        valid = ['art'] + ['label-' + c for c in LABEL_COLORS]
+        from lp.display import (LABEL_COLORS, MANDELBROT_VARIANTS,
+                                NEBULA_VARIANTS, MUNAFO_VARIANTS)
+        valid = (['art']
+                 + ['label-' + c for c in LABEL_COLORS]
+                 + ['mandelbrot-' + v[4] + '-' + v[5] for v in MANDELBROT_VARIANTS]
+                 + ['nebula-' + v[2] for v in NEBULA_VARIANTS]
+                 + ['munafo-' + v[0] for v in MUNAFO_VARIANTS])
         if req.label not in valid:
             raise HTTPException(400, f"Invalid label. Choose from: {', '.join(valid)}")
         player.vinyl_label = req.label
@@ -187,10 +270,24 @@ def create_app(player, library, static_dir, scrobbler=None):
 
     @app.get("/api/settings/label/options")
     def get_label_options():
-        from lp.display import LABEL_COLORS
-        options = [{'id': 'art', 'label': 'Album Art'}]
+        from lp.display import (LABEL_COLORS, MANDELBROT_VARIANTS,
+                                NEBULA_VARIANTS, MUNAFO_VARIANTS)
+        options = [{'id': 'art', 'label': 'Album Art', 'category': 'basic'}]
         for name in LABEL_COLORS:
-            options.append({'id': 'label-' + name, 'label': name.title()})
+            options.append({'id': 'label-' + name, 'label': name.title(),
+                            'category': 'color'})
+        for v in MANDELBROT_VARIANTS:
+            options.append({'id': 'mandelbrot-' + v[4] + '-' + v[5],
+                            'label': v[4].replace('-', ' ').title() + ' ' + v[5].title(),
+                            'category': 'mandelbrot'})
+        for v in NEBULA_VARIANTS:
+            options.append({'id': 'nebula-' + v[2],
+                            'label': v[2].replace('-', ' ').title(),
+                            'category': 'nebula'})
+        for v in MUNAFO_VARIANTS:
+            options.append({'id': 'munafo-' + v[0],
+                            'label': v[2] if len(v) > 2 else v[0],
+                            'category': 'munafo'})
         return {'options': options}
 
     # --- Brightness settings ---

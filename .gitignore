@@ -9,3 +9,7 @@ config.yml
 dev_out/
 test_records/
 lp/cache/
+# Keep the munafo vinyl-size cache — it's small (~14 MB) and required at
+# runtime. The 9000×9000 gold archives live in the bongsweat repo.
+!lp/cache/munafo/
+!lp/cache/munafo/*.png

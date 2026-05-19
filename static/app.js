@@ -9,6 +9,7 @@ const npTrack = $('#np-track');
 const npArtistAlbum = $('#np-artist-album');
 const npStop = $('#np-stop');
 const vinylBtn = $('#vinyl-btn');
+const shareBtn = $('#share-btn');
 const searchInput = $('#search');
 
 let currentArtist = null;
@@ -28,6 +29,54 @@ function coverUrl(artist, folder) {
 
 vinylBtn.addEventListener('click', () => {
   window.location.href = '/vinyl.html';
+});
+
+// --- Share screenshot ---
+
+const shareModal = $('#share-modal');
+const shareModalImg = $('#share-modal-img');
+const shareModalDownload = $('#share-modal-download');
+const shareModalClose = $('#share-modal-close');
+const shareModalBackdrop = $('#share-modal-backdrop');
+let shareModalUrl = null;
+
+function closeShareModal() {
+  shareModal.classList.add('hidden');
+  if (shareModalUrl) {
+    URL.revokeObjectURL(shareModalUrl);
+    shareModalUrl = null;
+  }
+  shareModalImg.removeAttribute('src');
+}
+
+shareBtn.addEventListener('click', async () => {
+  shareBtn.disabled = true;
+  try {
+    const res = await fetch('/api/share', { method: 'POST' });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const blob = await res.blob();
+    const disp = res.headers.get('Content-Disposition') || '';
+    const m = disp.match(/filename="([^"]+)"/);
+    const name = m ? m[1] : 'lp-share.png';
+    if (shareModalUrl) URL.revokeObjectURL(shareModalUrl);
+    shareModalUrl = URL.createObjectURL(blob);
+    shareModalImg.src = shareModalUrl;
+    shareModalDownload.href = shareModalUrl;
+    shareModalDownload.download = name;
+    shareModal.classList.remove('hidden');
+  } catch (e) {
+    alert('Share failed: ' + e.message);
+  } finally {
+    shareBtn.disabled = false;
+  }
+});
+
+shareModalClose.addEventListener('click', closeShareModal);
+shareModalBackdrop.addEventListener('click', closeShareModal);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !shareModal.classList.contains('hidden')) {
+    closeShareModal();
+  }
 });
 
 // --- Search ---

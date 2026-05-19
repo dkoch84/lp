@@ -1,0 +1,17 @@
+# lp Configuration for ODROID C4 Deployment
+# Place this at /etc/lp/config.yml on your ODROID C4
+
+music_library_path: /mnt/music
+
+display:
+  fullscreen: true
+  width: 1920      # Change to your display resolution
+  height: 1080
+
+api:
+  host: "0.0.0.0"  # Listen on all interfaces
+  port: 8000
+
+lastfm:
+  api_key: ""      # Optional: add your API key for scrobbling
+  api_secret: ""

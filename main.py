@@ -34,11 +34,14 @@ def main():
     library = Library(music_path)
     lastfm_config = config.get('lastfm', {})
     scrobbler = Scrobbler(player, lastfm_config)
-    app = create_app(player, library, static_dir, scrobbler)
 
     if args.no_display:
+        app = create_app(player, library, static_dir, scrobbler)
         uvicorn.run(app, host=host, port=port, log_level="info")
     else:
+        from lp.display import Display
+        display = Display(config, player, port)
+        app = create_app(player, library, static_dir, scrobbler, display)
         api_thread = threading.Thread(
             target=uvicorn.run,
             args=(app,),
@@ -46,8 +49,6 @@ def main():
             daemon=True,
         )
         api_thread.start()
-        from lp.display import Display
-        display = Display(config, player, port)
         try:
             display.run()
         except KeyboardInterrupt:

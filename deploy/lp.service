@@ -1,0 +1,23 @@
+[Unit]
+Description=lp - Album Music Player
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=daniel
+WorkingDirectory=/home/daniel/lp
+ExecStart=/home/daniel/lp/venv/bin/python main.py -c /home/daniel/.config/lp/config.yml
+Restart=always
+RestartSec=10
+
+# SDL direct rendering without X
+Environment="SDL_VIDEODRIVER=kmsdrm"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lp
+
+[Install]
+WantedBy=multi-user.target
