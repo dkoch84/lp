@@ -117,7 +117,7 @@ disc), and three fractal families:
 - **Nebula** — value-noise gas clouds in 19 color variants.
 - **Munafo Deep-Zoom** — `2.7×10⁻²²` deep-zoom Mandelbrot renders. The
   9000×9000 gold archives + the GPU/perturbation engine that produced
-  them live in a separate repo: **[bongsweat](../bongsweat/)**. The
+  them live in a separate repo: **[bongsweat](https://github.com/dkoch84/bongsweat)**. The
   vinyl-size cache (`lp/cache/munafo/*.png`, ~14 MB) is committed here
   and consumed at runtime by `_draw_munafo_vinyl()` in `lp/display.py`.
 
