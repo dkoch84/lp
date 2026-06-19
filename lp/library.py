@@ -80,6 +80,11 @@ class Library:
                 artist.albums.append(album)
                 albums_by_path[album_path] = album
 
+            # Always present an artist's albums chronologically. Albums with no
+            # parseable year sort last, then alphabetically.
+            artist.albums.sort(
+                key=lambda al: (al.year == '', al.year, al.display_name.lower()))
+
             if artist.albums:
                 artists[artist_name] = artist
 

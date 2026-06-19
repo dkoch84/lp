@@ -16,8 +16,19 @@
   </header>
 
   <main id="content">
-    <input id="search" type="text" placeholder="Search artists..." autocomplete="off">
+    <div id="artist-controls">
+      <input id="search" type="text" placeholder="Search artists..." autocomplete="off">
+      <select id="sort">
+        <option value="alpha">A–Z</option>
+        <option value="recent">Recently played</option>
+        <option value="favorites">Favorites</option>
+      </select>
+    </div>
     <div id="artist-grid" class="tile-grid view"></div>
+    <div id="album-controls" class="hidden">
+      <button id="album-grid-select" aria-label="Choose grid covers" title="Choose grid covers">&#9638;</button>
+      <button id="album-sort" aria-label="Toggle year sort order">Year &uarr;</button>
+    </div>
     <div id="album-grid" class="tile-grid view hidden"></div>
   </main>
 

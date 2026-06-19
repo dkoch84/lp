@@ -10,10 +10,22 @@ const npArtistAlbum = $('#np-artist-album');
 const npStop = $('#np-stop');
 const vinylBtn = $('#vinyl-btn');
 const shareBtn = $('#share-btn');
+const artistControls = $('#artist-controls');
 const searchInput = $('#search');
+const sortSelect = $('#sort');
+const albumControls = $('#album-controls');
+const albumSortBtn = $('#album-sort');
+const albumGridSelectBtn = $('#album-grid-select');
 
 let currentArtist = null;
 let statusInterval = null;
+let allArtists = [];
+let currentAlbums = [];
+let currentSort = localStorage.getItem('lp.artistSort') || 'alpha';
+sortSelect.value = currentSort;
+let albumSortDir = localStorage.getItem('lp.albumSort') || 'asc';
+let gridMode = false;        // collage cover-selection mode
+let gridSelection = [];      // ordered album folders chosen for the collage
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -21,8 +33,9 @@ async function api(path, opts) {
   return res.json();
 }
 
-function coverUrl(artist, folder) {
-  return `/api/albums/${encodeURIComponent(artist)}/${encodeURIComponent(folder)}/cover`;
+function coverUrl(artist, folder, size) {
+  const q = size ? `?size=${encodeURIComponent(size)}` : '';
+  return `/api/albums/${encodeURIComponent(artist)}/${encodeURIComponent(folder)}/cover${q}`;
 }
 
 // --- Vinyl style ---
@@ -81,28 +94,44 @@ document.addEventListener('keydown', (e) => {
 
 // --- Search ---
 
-searchInput.addEventListener('input', () => {
-  const q = searchInput.value.toLowerCase();
-  for (const tile of artistGrid.children) {
-    const name = tile.dataset.name || '';
-    tile.style.display = name.includes(q) ? '' : 'none';
-  }
+searchInput.addEventListener('input', renderArtists);
+
+sortSelect.addEventListener('change', () => {
+  currentSort = sortSelect.value;
+  localStorage.setItem('lp.artistSort', currentSort);
+  renderArtists();
 });
 
 // --- Artist grid ---
 
-async function showArtists() {
-  currentArtist = null;
-  albumGrid.classList.add('hidden');
-  artistGrid.classList.remove('hidden');
-  searchInput.classList.remove('hidden');
-  searchInput.value = '';
-  backBtn.classList.add('hidden');
-  headerTitle.textContent = 'lp';
+function sortArtists(artists) {
+  const byName = (a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  const arr = artists.slice();
+  if (currentSort === 'recent') {
+    arr.sort((a, b) => {
+      const la = a.last_played || 0;
+      const lb = b.last_played || 0;
+      if (lb !== la) return lb - la;
+      return byName(a, b);
+    });
+  } else if (currentSort === 'favorites') {
+    arr.sort((a, b) => {
+      if (!!b.favorite !== !!a.favorite) return b.favorite - a.favorite;
+      return byName(a, b);
+    });
+  } else {
+    arr.sort(byName);
+  }
+  return arr;
+}
 
-  const artists = await api('/api/artists');
+function renderArtists() {
+  const q = searchInput.value.toLowerCase();
+  const filtered = allArtists.filter(a => a.name.toLowerCase().includes(q));
+  const sorted = sortArtists(filtered);
+
   artistGrid.innerHTML = '';
-  for (const a of artists) {
+  for (const a of sorted) {
     const tile = document.createElement('div');
     tile.className = 'artist-tile';
     tile.dataset.name = a.name.toLowerCase();
@@ -111,52 +140,170 @@ async function showArtists() {
     if (a.covers.length === 0) {
       collageHtml = `<div class="artist-collage-empty">&#9835;</div>`;
     } else {
-      const count = a.covers.length >= 4 ? 4 : a.covers.length >= 2 ? 2 : 1;
-      const cls = count >= 4 ? 'cols-4' : count >= 2 ? 'cols-2' : 'cols-1';
+      const n = a.covers.length;
+      const count = n >= 4 ? 4 : n >= 3 ? 3 : n >= 2 ? 2 : 1;
+      const cls = count >= 4 ? 'cols-4' : count === 3 ? 'cols-3' : count >= 2 ? 'cols-2' : 'cols-1';
       const imgs = a.covers.slice(0, count)
-        .map(folder => `<img src="${coverUrl(a.name, folder)}" alt="" loading="lazy">`)
+        .map(folder => `<img src="${coverUrl(a.name, folder, 'thumb')}" alt="" loading="lazy">`)
         .join('');
       collageHtml = `<div class="artist-collage ${cls}">${imgs}</div>`;
     }
 
+    const favClass = a.favorite ? 'fav-btn is-fav' : 'fav-btn';
+    const favSymbol = a.favorite ? '★' : '☆';
     tile.innerHTML = `
       ${collageHtml}
+      <button class="${favClass}" aria-label="Favorite" aria-pressed="${a.favorite}">${favSymbol}</button>
       <div class="artist-name">${esc(a.name)}</div>
       <div class="artist-count">${a.album_count} album${a.album_count !== 1 ? 's' : ''}</div>
     `;
     tile.addEventListener('click', () => showAlbums(a.name));
+    tile.querySelector('.fav-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFavorite(a);
+    });
     artistGrid.appendChild(tile);
   }
+}
+
+async function toggleFavorite(artist) {
+  const next = !artist.favorite;
+  try {
+    await api(`/api/artists/${encodeURIComponent(artist.name)}/favorite`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({favorite: next}),
+    });
+    artist.favorite = next;
+    renderArtists();
+  } catch (e) {
+    console.error('Favorite toggle failed', e);
+  }
+}
+
+async function showArtists() {
+  currentArtist = null;
+  gridMode = false;
+  albumGrid.classList.add('hidden');
+  albumControls.classList.add('hidden');
+  artistGrid.classList.remove('hidden');
+  artistControls.classList.remove('hidden');
+  searchInput.value = '';
+  backBtn.classList.add('hidden');
+  headerTitle.textContent = 'lp';
+
+  allArtists = await api('/api/artists');
+  renderArtists();
 }
 
 // --- Album grid ---
 
 async function showAlbums(artistName) {
   currentArtist = artistName;
+  gridMode = false;
   artistGrid.classList.add('hidden');
-  searchInput.classList.add('hidden');
+  artistControls.classList.add('hidden');
   albumGrid.classList.remove('hidden');
+  albumControls.classList.remove('hidden');
   backBtn.classList.remove('hidden');
   headerTitle.textContent = artistName;
 
-  const albums = await api(`/api/artists/${encodeURIComponent(artistName)}/albums`);
+  currentAlbums = await api(`/api/artists/${encodeURIComponent(artistName)}/albums`);
+  renderAlbums();
+}
+
+function sortAlbumsByYear(albums) {
+  const arr = albums.slice();
+  arr.sort((a, b) => {
+    const ay = a.year || '', by = b.year || '';
+    if (!ay && !by) return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    if (!ay) return 1;   // year-less albums always last
+    if (!by) return -1;
+    const cmp = ay.localeCompare(by);
+    return albumSortDir === 'desc' ? -cmp : cmp;
+  });
+  return arr;
+}
+
+function renderAlbums() {
+  albumSortBtn.innerHTML = `Year ${albumSortDir === 'asc' ? '↑' : '↓'}`;
+  albumGridSelectBtn.classList.toggle('active', gridMode);
+  albumGridSelectBtn.innerHTML = gridMode ? 'Done' : '&#9638;';
+
   albumGrid.innerHTML = '';
-  for (const a of albums) {
+  for (const a of sortAlbumsByYear(currentAlbums)) {
     const tile = document.createElement('div');
     tile.className = 'album-tile';
 
     tile.innerHTML = `
       ${a.has_cover
-        ? `<img class="album-cover" src="${coverUrl(artistName, a.folder)}" alt="" loading="lazy">`
+        ? `<img class="album-cover" src="${coverUrl(currentArtist, a.folder, 'thumb')}" alt="" loading="lazy">`
         : `<div class="album-cover-placeholder">&#9835;</div>`
       }
       <div class="album-title">${esc(a.name)}</div>
       ${a.year ? `<div class="album-year">${esc(a.year)}</div>` : ''}
     `;
-    tile.addEventListener('click', () => playAlbum(artistName, a.folder));
+
+    if (gridMode) {
+      tile.classList.add('selecting');
+      if (a.has_cover) {
+        tile.classList.add('selectable');
+        const idx = gridSelection.indexOf(a.folder);
+        if (idx >= 0) {
+          tile.classList.add('selected');
+          const badge = document.createElement('div');
+          badge.className = 'grid-badge';
+          badge.textContent = String(idx + 1);
+          tile.appendChild(badge);
+        }
+        tile.addEventListener('click', () => toggleGridSelect(a.folder));
+      }
+      // Albums with no cover art can't appear in the collage — not selectable.
+    } else {
+      tile.addEventListener('click', () => playAlbum(currentArtist, a.folder));
+    }
     albumGrid.appendChild(tile);
   }
 }
+
+function toggleGridSelect(folder) {
+  const i = gridSelection.indexOf(folder);
+  if (i >= 0) gridSelection.splice(i, 1);        // deselect → others renumber
+  else if (gridSelection.length < 4) gridSelection.push(folder);
+  else return;                                   // cap at 4
+  renderAlbums();
+}
+
+albumSortBtn.addEventListener('click', () => {
+  albumSortDir = albumSortDir === 'asc' ? 'desc' : 'asc';
+  localStorage.setItem('lp.albumSort', albumSortDir);
+  renderAlbums();
+});
+
+albumGridSelectBtn.addEventListener('click', async () => {
+  if (!gridMode) {
+    // Enter selection mode, pre-seeded with the current collage.
+    const art = allArtists.find(a => a.name === currentArtist);
+    gridSelection = art && art.covers ? art.covers.slice(0, 4) : [];
+    gridMode = true;
+    renderAlbums();
+  } else {
+    // Save the chosen covers (tap order) and exit.
+    try {
+      const res = await api(`/api/artists/${encodeURIComponent(currentArtist)}/grid`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({folders: gridSelection}),
+      });
+      const art = allArtists.find(a => a.name === currentArtist);
+      if (art) art.covers = res.covers;
+    } catch (e) {
+      console.error('Grid save failed', e);
+    }
+    gridMode = false;
+    renderAlbums();
+  }
+});
 
 // --- Play ---
 

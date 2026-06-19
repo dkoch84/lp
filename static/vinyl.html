@@ -77,9 +77,7 @@
       transition: border-color 0.15s;
     }
 
-    .vinyl-item.active .vinyl-thumb {
-      border-color: #888;
-    }
+    .vinyl-item.active .vinyl-thumb { border-color: #888; }
 
     .vinyl-thumb img {
       width: 100%;
@@ -105,144 +103,212 @@
       line-height: 1.3;
     }
 
-    .vinyl-item.active .vinyl-label {
-      color: #fff;
+    .vinyl-item.active .vinyl-label { color: #fff; }
+
+    .role-chips {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 4px;
+      min-height: 14px;
     }
 
-    .slider-section {
-      padding: 16px 20px;
-    }
-
-    .slider-section h2 {
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: #666;
+    .role-chip {
+      font-size: 0.58rem;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #222;
+      letter-spacing: 0.04em;
+      border-radius: 3px;
+      padding: 1px 5px;
+      line-height: 1.5;
     }
 
-    .slider-row {
+    .role-chip.vinyl { background: #2c3b56; color: #bcd6ff; }
+    .role-chip.disc  { background: #4a2c52; color: #f3c8ff; }
+    .role-chip.label { background: #2c4a32; color: #c4f0cf; }
+
+    /* Role action sheet */
+    #sheet {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
       display: flex;
       align-items: center;
-      gap: 12px;
+      justify-content: center;
+      padding: 16px;
     }
-
-    .slider-row input[type="range"] {
-      flex: 1;
-      accent-color: #888;
-    }
-
-    .slider-value {
-      color: #aaa;
-      font-size: 0.85rem;
-      min-width: 36px;
-      text-align: right;
-    }
-
-    .lastfm-section {
-      padding: 16px 20px;
-    }
-
-    .lastfm-section h2 {
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: #666;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid #222;
-    }
-
-    .lastfm-status {
-      font-size: 0.85rem;
-      color: #888;
-      margin-bottom: 12px;
-    }
-
-    .lastfm-status .username {
-      color: #eee;
-      font-weight: 500;
-    }
-
-    .lastfm-form {
+    #sheet.hidden { display: none; }
+    #sheet-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.8); }
+    #sheet-content {
+      position: relative;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 22px 20px 16px;
+      width: 300px;
+      max-width: 100%;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      max-width: 300px;
-    }
-
-    .lastfm-form input[type="text"],
-    .lastfm-form input[type="password"] {
-      background: #222;
-      border: 1px solid #333;
-      color: #eee;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 0.85rem;
-    }
-
-    .lastfm-form input::placeholder {
-      color: #555;
-    }
-
-    .lastfm-btn {
-      background: #333;
-      border: none;
-      color: #eee;
-      padding: 8px 16px;
-      border-radius: 4px;
-      font-size: 0.85rem;
-      cursor: pointer;
-      align-self: flex-start;
-    }
-
-    .lastfm-btn:active { background: #444; }
-    .lastfm-btn.danger { color: #c44; }
-
-    .lastfm-row {
-      display: flex;
       align-items: center;
       gap: 12px;
-      margin-bottom: 8px;
     }
-
-    .lastfm-toggle {
-      position: relative;
-      width: 40px;
-      height: 22px;
-      background: #333;
-      border-radius: 11px;
-      cursor: pointer;
-      transition: background 0.2s;
-      border: none;
-      padding: 0;
-    }
-
-    .lastfm-toggle.on { background: #4a4; }
-
-    .lastfm-toggle::after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 18px;
-      height: 18px;
-      background: #eee;
+    #sheet-thumb {
+      width: 96px;
+      height: 96px;
       border-radius: 50%;
-      transition: transform 0.2s;
+      overflow: hidden;
+      background: #222;
+    }
+    #sheet-thumb .vinyl-thumb { border: none; }
+    #sheet-title { font-size: 0.95rem; color: #eee; text-align: center; }
+    .sheet-btn {
+      width: 100%;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #eee;
+      padding: 12px;
+      border-radius: 7px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .sheet-btn:active { background: #3a3a3a; }
+    .sheet-btn.current { border-color: #6a8a72; color: #9dd6a8; }
+    .sheet-btn .tag { color: #777; font-size: 0.7rem; margin-left: 6px; }
+    .sheet-cancel {
+      background: none;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 4px;
     }
 
+    /* Touch-friendly role rows with a preview of the result */
+    .role-option {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .role-option:active { background: #2c2c2c; }
+    .role-option.current { border-color: #6a8a72; }
+    .role-option .ro-text {
+      font-size: 1.02rem;
+      color: #eee;
+      text-align: left;
+      flex: 1;
+    }
+    .role-option .ro-current { display: block; color: #9dd6a8; font-size: 0.72rem; margin-top: 2px; }
+
+    /* Mini record used as a role preview: outer disc + center label */
+    .rp-disc {
+      position: relative;
+      width: 88px;
+      height: 88px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: #1c1c1c;
+      background-size: cover;
+      background-position: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+      font-size: 1.6rem;
+    }
+    .rp-disc.white { background: #ededed; }
+    .rp-label {
+      position: absolute;
+      width: 32%;
+      height: 32%;
+      border-radius: 50%;
+      background-size: cover;
+      background-position: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+    }
+    .rp-label.white { background: #fff; }
+    .rp-spindle {
+      position: absolute;
+      width: 6%;
+      height: 6%;
+      border-radius: 50%;
+      background: #111;
+    }
+
+    .slider-section, .lastfm-section { padding: 16px 20px; }
+
+    .slider-section h2, .lastfm-section h2 {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #222;
+    }
+
+    .lt-modes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .lt-btn {
+      background: #222; border: 1px solid #333; color: #ccc;
+      padding: 8px 14px; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+    }
+    .lt-btn.active { background: #2c3b56; border-color: #4a7; color: #bcd6ff; }
+    .lt-font {
+      padding: 9px 12px; background: #222; border: 1px solid #333;
+      border-radius: 6px; color: #eee; font-size: 0.9rem; cursor: pointer;
+    }
+    .lt-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+    .lt-row > span { min-width: 56px; color: #aaa; font-size: 0.85rem; }
+    .lt-row input[type="color"] {
+      width: 42px; height: 30px; padding: 2px; border: 1px solid #333;
+      background: #222; border-radius: 6px; cursor: pointer;
+    }
+    .lt-auto {
+      background: #222; border: 1px solid #333; color: #888;
+      padding: 6px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+    }
+    .lt-auto.active { background: #2c3b56; border-color: #4a7; color: #bcd6ff; }
+
+    .slider-row { display: flex; align-items: center; gap: 12px; }
+    .slider-row input[type="range"] { flex: 1; accent-color: #888; }
+    .slider-value { color: #aaa; font-size: 0.85rem; min-width: 36px; text-align: right; }
+
+    .lastfm-status { font-size: 0.85rem; color: #888; margin-bottom: 12px; }
+    .lastfm-status .username { color: #eee; font-weight: 500; }
+    .lastfm-form { display: flex; flex-direction: column; gap: 8px; max-width: 300px; }
+    .lastfm-form input[type="text"], .lastfm-form input[type="password"] {
+      background: #222; border: 1px solid #333; color: #eee;
+      padding: 8px 12px; border-radius: 4px; font-size: 0.85rem;
+    }
+    .lastfm-form input::placeholder { color: #555; }
+    .lastfm-btn {
+      background: #333; border: none; color: #eee; padding: 8px 16px;
+      border-radius: 4px; font-size: 0.85rem; cursor: pointer; align-self: flex-start;
+    }
+    .lastfm-btn:active { background: #444; }
+    .lastfm-btn.danger { color: #c44; }
+    .lastfm-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .lastfm-toggle {
+      position: relative; width: 40px; height: 22px; background: #333;
+      border-radius: 11px; cursor: pointer; transition: background 0.2s; border: none; padding: 0;
+    }
+    .lastfm-toggle.on { background: #4a4; }
+    .lastfm-toggle::after {
+      content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+      background: #eee; border-radius: 50%; transition: transform 0.2s;
+    }
     .lastfm-toggle.on::after { transform: translateX(18px); }
-
-    .lastfm-error {
-      color: #c44;
-      font-size: 0.8rem;
-      margin-top: 4px;
-    }
+    .lastfm-error { color: #c44; font-size: 0.8rem; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -253,390 +319,506 @@
     <span id="current-style"></span>
   </header>
 
-  <div id="gallery-container"></div>
+  <div id="style-root"></div>
+  <div id="controls-root"></div>
+
+  <!-- Role action sheet -->
+  <div id="sheet" class="hidden" role="dialog" aria-modal="true">
+    <div id="sheet-backdrop"></div>
+    <div id="sheet-content">
+      <div id="sheet-thumb"></div>
+      <div id="sheet-title"></div>
+      <div id="sheet-buttons" style="width:100%;display:flex;flex-direction:column;gap:8px;"></div>
+      <button class="sheet-cancel" id="sheet-cancel">Cancel</button>
+    </div>
+  </div>
 
   <script>
-    const container = document.getElementById('gallery-container');
+    const styleRoot = document.getElementById('style-root');
+    const controlsRoot = document.getElementById('controls-root');
     const currentStyleEl = document.getElementById('current-style');
+
     let currentStyle = 'random';
     let currentLabel = 'art';
+    let options = [];                       // vinyl options (basic/color/fractals)
+    const pools = { mandelbrot: [], nebula: [], munafo: [], color: [] };
+    let randomPool = [];
+
+    const RANDOM_IDS = ['random', 'color', 'mandelbrot', 'nebula', 'munafo'];
+    const CATS = [
+      ['basic', 'Basic'],
+      ['color', 'Colored'],
+      ['mandelbrot', 'Mandelbrot'],
+      ['nebula', 'Nebula'],
+      ['munafo', 'Munafo Deep-Zoom'],
+    ];
 
     async function api(path, opts) {
       const res = await fetch(path, opts);
       if (!res.ok) throw new Error(`${res.status}`);
       return res.json();
     }
+    const post = (path, body) => api(path, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+
+    // --- Thumbnails ---
 
     function previewUrl(id) {
-      // 'pattern-X' shares preview thumbnails with the underlying fractal.
-      if (id.startsWith('pattern-')) {
-        id = id.slice('pattern-'.length);
-      }
-      // Strip prefix to get cache filename
-      if (id.startsWith('mandelbrot-')) {
-        const name = id.slice('mandelbrot-'.length);
-        return `/api/vinyl/preview/${name}`;
-      }
-      if (id.startsWith('nebula-')) {
-        const name = id.slice('nebula-'.length);
-        return `/api/vinyl/preview/${name}`;
-      }
-      if (id.startsWith('munafo-')) {
-        const name = id.slice('munafo-'.length);
-        return `/api/vinyl/preview/${name}`;
+      let s = id.startsWith('pattern-') ? id.slice('pattern-'.length) : id;
+      for (const pfx of ['mandelbrot-', 'nebula-', 'munafo-']) {
+        if (s.startsWith(pfx)) return `/api/vinyl/preview/${s.slice(pfx.length)}`;
       }
       return null;
     }
 
     // CSS colors matching VINYL_COLORS base values from display.py
     const vinylColorMap = {
-      'color-red':        'rgb(130,35,35)',
-      'color-navy':       'rgb(40,50,120)',
-      'color-forest':     'rgb(35,100,50)',
-      'color-plum':       'rgb(110,40,95)',
-      'color-chocolate':  'rgb(120,65,30)',
-      'color-slate':      'rgb(80,90,105)',
-      'color-amber':      'rgb(140,95,25)',
-      'color-teal':       'rgb(30,110,110)',
-      'color-burgundy':   'rgb(115,30,55)',
-      'color-olive':      'rgb(90,100,35)',
-      'color-cream':      'rgb(200,190,160)',
-      'color-purple':     'rgb(220,100,255)',
-      'color-fire':       'rgb(255,180,45)',
-      'color-ocean':      'rgb(70,180,255)',
-      'color-emerald':    'rgb(100,230,85)',
-      'color-gold':       'rgb(255,200,60)',
-      'color-mono':       'rgb(255,255,255)',
-      'color-copper':     'rgb(210,130,70)',
-      'color-rose':       'rgb(200,90,160)',
-      'color-rust':       'rgb(210,105,55)',
-      'color-lavender':   'rgb(180,120,220)',
-      'color-midnight':   'rgb(75,60,210)',
-    };
-
-    // CSS colors for label presets
-    const labelColorMap = {
-      'label-brown':  'rgb(140,90,60)',
-      'label-black':  'rgb(30,30,30)',
-      'label-white':  'rgb(230,230,225)',
-      'label-cream':  'rgb(210,200,170)',
-      'label-red':    'rgb(160,40,40)',
-      'label-orange': 'rgb(180,100,30)',
-      'label-yellow': 'rgb(200,185,50)',
-      'label-green':  'rgb(40,130,55)',
-      'label-blue':   'rgb(45,60,150)',
-      'label-purple': 'rgb(100,45,140)',
+      'color-red': 'rgb(130,35,35)', 'color-navy': 'rgb(40,50,120)',
+      'color-forest': 'rgb(35,100,50)', 'color-plum': 'rgb(110,40,95)',
+      'color-chocolate': 'rgb(120,65,30)', 'color-slate': 'rgb(80,90,105)',
+      'color-amber': 'rgb(140,95,25)', 'color-teal': 'rgb(30,110,110)',
+      'color-burgundy': 'rgb(115,30,55)', 'color-olive': 'rgb(90,100,35)',
+      'color-cream': 'rgb(200,190,160)', 'color-purple': 'rgb(220,100,255)',
+      'color-fire': 'rgb(255,180,45)', 'color-ocean': 'rgb(70,180,255)',
+      'color-emerald': 'rgb(100,230,85)', 'color-gold': 'rgb(255,200,60)',
+      'color-mono': 'rgb(255,255,255)', 'color-copper': 'rgb(210,130,70)',
+      'color-rose': 'rgb(200,90,160)', 'color-rust': 'rgb(210,105,55)',
+      'color-lavender': 'rgb(180,120,220)', 'color-midnight': 'rgb(75,60,210)',
+      'color-cyan': 'rgb(11,187,208)',
     };
 
     function placeholderFor(id) {
       const icons = {
         random: '🎲', black: '⚫', clear: '⚪', color: '🎨',
-        picture: '🖼', mandelbrot: '🌀', nebula: '🌌', art: '🖼',
+        picture: '🖼', art: '🖼', mandelbrot: '🌀', nebula: '🌌', munafo: '🔮',
       };
       return icons[id] || '●';
     }
 
-    async function setLabel(id) {
-      currentLabel = id;
-      await api('/api/settings/label', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({label: id}),
-      });
-      document.querySelectorAll('.label-item').forEach(el => {
-        el.classList.toggle('active', el.dataset.id === id);
-      });
-    }
-
-    async function setBrightness(val) {
-      await api('/api/settings/brightness', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({brightness: val}),
-      });
-    }
-
-    function renderLabelItem(opt) {
-      const div = document.createElement('div');
-      div.className = 'vinyl-item label-item' + (opt.id === currentLabel ? ' active' : '');
-      div.dataset.id = opt.id;
-
+    function makeThumb(opt) {
       const thumb = document.createElement('div');
       thumb.className = 'vinyl-thumb';
-
-      const cssColor = labelColorMap[opt.id];
-      const fractalUrl = previewUrl(opt.id);
-      if (cssColor) {
-        thumb.style.background = cssColor;
-      } else if (opt.id.startsWith('julia-')) {
+      const url = previewUrl(opt.id);
+      const css = vinylColorMap[opt.id];
+      if (url) {
         const img = document.createElement('img');
-        img.src = '/api/vinyl/preview/' + encodeURIComponent(opt.id);
-        img.className = 'vinyl-thumb-img';
-        img.loading = 'lazy';
+        img.src = url; img.alt = opt.label; img.loading = 'lazy';
         thumb.appendChild(img);
-      } else if (fractalUrl) {
-        // Mandelbrot / nebula / munafo labels reuse the vinyl preview cache.
-        const img = document.createElement('img');
-        img.src = fractalUrl;
-        img.className = 'vinyl-thumb-img';
-        img.loading = 'lazy';
-        thumb.appendChild(img);
+      } else if (css) {
+        thumb.style.background = css;
       } else {
         const ph = document.createElement('div');
         ph.className = 'vinyl-thumb-placeholder';
         ph.textContent = placeholderFor(opt.id);
         thumb.appendChild(ph);
       }
-
-      const label = document.createElement('div');
-      label.className = 'vinyl-label';
-      label.textContent = opt.label;
-
-      div.appendChild(thumb);
-      div.appendChild(label);
-      div.addEventListener('click', () => setLabel(opt.id));
-      return div;
+      return thumb;
     }
 
-    async function setStyle(id) {
-      currentStyle = id;
-      await api('/api/settings/vinyl', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({style: id}),
-      });
-      currentStyleEl.textContent = id;
-      document.querySelectorAll('.vinyl-item').forEach(el => {
-        el.classList.toggle('active', el.dataset.id === id);
-      });
+    // The design's visual fill: a fractal preview image, a CSS color, or album art.
+    function designFill(opt) {
+      const url = previewUrl(opt.id);
+      if (url) return { img: url };
+      const css = vinylColorMap[opt.id];
+      if (css) return { color: css };
+      if (opt.id === 'picture') return { art: true };
+      return { color: '#333' };
     }
+    function applyFill(el, fill) {
+      if (fill.img) el.style.backgroundImage = `url(${fill.img})`;
+      else if (fill.color) el.style.background = fill.color;
+      else if (fill.art) { el.classList.add('white'); el.textContent = '🖼'; }
+    }
+
+    // A mini-record preview illustrating what a role will look like:
+    //   vinyl       → design as the disc body + white center label
+    //   picturedisc → design fills the whole disc (no label)
+    //   label       → design as the center label on a blank white disc
+    function makePreview(opt, role) {
+      const disc = document.createElement('div');
+      disc.className = 'rp-disc';
+      const fill = designFill(opt);
+      if (role === 'label') {
+        disc.classList.add('white');
+        const lab = document.createElement('div');
+        lab.className = 'rp-label';
+        applyFill(lab, fill);
+        disc.appendChild(lab);
+      } else {
+        applyFill(disc, fill);
+        if (role === 'vinyl') {
+          const lab = document.createElement('div');
+          lab.className = 'rp-label white';
+          disc.appendChild(lab);
+        }
+        const hole = document.createElement('div');
+        hole.className = 'rp-spindle';
+        disc.appendChild(hole);
+      }
+      return disc;
+    }
+
+    // --- Roles ---
+    // vinyl       — set as the spinning record body (with a label)
+    // picturedisc — fractal/album-art fills the whole disc, no label
+    // label       — render in the center label
+
+    function rolesFor(opt) {
+      if (opt.category === 'basic') {
+        if (opt.id === 'picture') return ['picturedisc', 'label']; // Album Art
+        return ['vinyl'];                                          // random / black / clear
+      }
+      if (opt.category === 'color') return ['vinyl', 'label'];
+      return ['vinyl', 'picturedisc', 'label'];                    // fractal families
+    }
+
+    const ROLE_LABEL = { vinyl: 'Set as Vinyl', picturedisc: 'Set as Picture Disc', label: 'Set as Label' };
+
+    let labelPool = [];
+    const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+    function reroll(kind) {
+      const pool = kind === 'random' ? randomPool : pools[kind];
+      return pick(pool);
+    }
+
+    async function applyRandomAll() {
+      // "Random" re-rolls BOTH the vinyl and the center label.
+      const style = reroll('random');
+      const label = pick(labelPool);
+      await Promise.all([
+        post('/api/settings/vinyl', { style }),
+        post('/api/settings/label', { label }),
+      ]);
+      currentStyle = style; currentLabel = label;
+      currentStyleEl.textContent = style;
+      renderGalleries();
+    }
+
+    async function applyVinyl(styleId) {
+      await post('/api/settings/vinyl', { style: styleId });
+      currentStyle = styleId;
+      currentStyleEl.textContent = styleId;
+      renderGalleries();
+    }
+    async function applyLabel(labelId) {
+      await post('/api/settings/label', { label: labelId });
+      currentLabel = labelId;
+      renderGalleries();
+    }
+
+    function doRole(opt, role) {
+      if (role === 'vinyl') {
+        // "Random" re-rolls both vinyl and label; the family randoms re-roll
+        // just their vinyl; everything else applies its concrete id.
+        if (opt.id === 'random') return applyRandomAll();
+        if (opt.category === 'basic' && RANDOM_IDS.includes(opt.id)) return applyVinyl(reroll(opt.id));
+        return applyVinyl(opt.id);                                   // black/clear/color-x/fractal
+      }
+      if (role === 'picturedisc') {
+        if (opt.id === 'picture') return applyVinyl('picture');      // album-art disc
+        return applyVinyl('pattern-' + opt.id);                      // fractal disc
+      }
+      if (role === 'label') {
+        if (opt.id === 'picture') return applyLabel('art');          // album art center
+        return applyLabel(opt.id);                                   // color-x / fractal
+      }
+    }
+
+    function onItemClick(opt) {
+      const roles = rolesFor(opt);
+      if (roles.length === 1) return doRole(opt, roles[0]);
+      openSheet(opt, roles);
+    }
+
+    // Which roles of this item are currently in effect (for highlighting).
+    function activeRoles(opt) {
+      const a = new Set();
+      if (opt.id === 'picture') {
+        if (currentStyle === 'picture') a.add('picturedisc');
+        if (currentLabel === 'art') a.add('label');
+        return a;
+      }
+      if (opt.category === 'basic') {
+        if (currentStyle === opt.id) a.add('vinyl');
+        return a;
+      }
+      // color + fractals
+      if (currentStyle === opt.id) a.add('vinyl');
+      if (currentStyle === 'pattern-' + opt.id) a.add('picturedisc');
+      if (currentLabel === opt.id) a.add('label');
+      return a;
+    }
+
+    // --- Action sheet ---
+    const sheet = document.getElementById('sheet');
+    const sheetThumb = document.getElementById('sheet-thumb');
+    const sheetTitle = document.getElementById('sheet-title');
+    const sheetButtons = document.getElementById('sheet-buttons');
+
+    function openSheet(opt, roles) {
+      sheetThumb.innerHTML = '';
+      sheetThumb.appendChild(makeThumb(opt));
+      sheetTitle.textContent = opt.label;
+      const active = activeRoles(opt);
+      sheetButtons.innerHTML = '';
+      for (const role of roles) {
+        const row = document.createElement('div');
+        row.className = 'role-option' + (active.has(role) ? ' current' : '');
+        row.appendChild(makePreview(opt, role));
+        const text = document.createElement('div');
+        text.className = 'ro-text';
+        text.innerHTML = ROLE_LABEL[role] +
+          (active.has(role) ? '<span class="ro-current">current</span>' : '');
+        row.appendChild(text);
+        row.addEventListener('click', async () => { await doRole(opt, role); closeSheet(); });
+        sheetButtons.appendChild(row);
+      }
+      sheet.classList.remove('hidden');
+    }
+    function closeSheet() { sheet.classList.add('hidden'); }
+    document.getElementById('sheet-cancel').addEventListener('click', closeSheet);
+    document.getElementById('sheet-backdrop').addEventListener('click', closeSheet);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !sheet.classList.contains('hidden')) closeSheet();
+    });
+
+    // --- Render ---
 
     function renderItem(opt) {
       const div = document.createElement('div');
-      div.className = 'vinyl-item' + (opt.id === currentStyle ? ' active' : '');
-      div.dataset.id = opt.id;
+      div.className = 'vinyl-item';
+      const active = activeRoles(opt);
+      if (active.size) div.classList.add('active');
 
-      const thumb = document.createElement('div');
-      thumb.className = 'vinyl-thumb';
-
-      const url = previewUrl(opt.id);
-      const cssColor = vinylColorMap[opt.id];
-      if (url) {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = opt.label;
-        img.loading = 'lazy';
-        thumb.appendChild(img);
-      } else if (cssColor) {
-        thumb.style.background = cssColor;
-      } else {
-        const ph = document.createElement('div');
-        ph.className = 'vinyl-thumb-placeholder';
-        ph.textContent = placeholderFor(opt.id);
-        thumb.appendChild(ph);
-      }
+      div.appendChild(makeThumb(opt));
 
       const label = document.createElement('div');
       label.className = 'vinyl-label';
       label.textContent = opt.label;
-
-      div.appendChild(thumb);
       div.appendChild(label);
-      div.addEventListener('click', () => setStyle(opt.id));
+
+      const chips = document.createElement('div');
+      chips.className = 'role-chips';
+      if (active.has('vinyl')) chips.appendChild(chip('Vinyl', 'vinyl'));
+      if (active.has('picturedisc')) chips.appendChild(chip('Disc', 'disc'));
+      if (active.has('label')) chips.appendChild(chip('Label', 'label'));
+      div.appendChild(chips);
+
+      div.addEventListener('click', () => onItemClick(opt));
       return div;
+    }
+
+    function chip(text, cls) {
+      const c = document.createElement('span');
+      c.className = 'role-chip ' + cls;
+      c.textContent = text;
+      return c;
+    }
+
+    function renderGalleries() {
+      styleRoot.innerHTML = '';
+      for (const [cat, title] of CATS) {
+        const items = options.filter(o => o.category === cat);
+        if (!items.length) continue;
+        const section = document.createElement('div');
+        section.className = 'section';
+        const h2 = document.createElement('h2');
+        h2.textContent = title;
+        section.appendChild(h2);
+        const gallery = document.createElement('div');
+        gallery.className = 'gallery';
+        for (const opt of items) gallery.appendChild(renderItem(opt));
+        section.appendChild(gallery);
+        styleRoot.appendChild(section);
+      }
+    }
+
+    // --- Brightness + Last.fm (rendered once into controlsRoot) ---
+
+    function renderBrightness(value) {
+      const section = document.createElement('div');
+      section.className = 'slider-section';
+      const h2 = document.createElement('h2'); h2.textContent = 'Brightness';
+      section.appendChild(h2);
+      const row = document.createElement('div'); row.className = 'slider-row';
+      const slider = document.createElement('input');
+      slider.type = 'range'; slider.min = '0'; slider.max = '100'; slider.value = String(value);
+      const val = document.createElement('span'); val.className = 'slider-value'; val.textContent = value + '%';
+      slider.addEventListener('input', () => { val.textContent = slider.value + '%'; });
+      slider.addEventListener('change', () => post('/api/settings/brightness', { brightness: parseInt(slider.value) }));
+      row.appendChild(slider); row.appendChild(val); section.appendChild(row);
+      return section;
+    }
+
+    const MODE_LABELS = { none: 'None', curved: 'Curved', straight: 'Straight', blocky: 'Blocky' };
+    const setLT = (patch) => post('/api/settings/label-text', patch);
+    const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+    function colorControl(val, onChange) {
+      const inp = document.createElement('input');
+      inp.type = 'color';
+      inp.value = (val && val.startsWith('#')) ? val : '#cccccc';
+      const auto = document.createElement('button');
+      auto.className = 'lt-auto' + (val === 'auto' ? ' active' : '');
+      auto.textContent = 'Auto';
+      inp.addEventListener('input', () => { auto.classList.remove('active'); onChange(inp.value); });
+      auto.addEventListener('click', () => { auto.classList.add('active'); onChange('auto'); });
+      return [inp, auto];
+    }
+
+    function labelRow(name, ...nodes) {
+      const row = document.createElement('div');
+      row.className = 'lt-row';
+      const sp = document.createElement('span');
+      sp.textContent = name;
+      row.appendChild(sp);
+      nodes.forEach(n => row.appendChild(n));
+      return row;
+    }
+
+    function renderLabelText(data) {
+      const section = document.createElement('div');
+      section.className = 'slider-section';
+      const h2 = document.createElement('h2');
+      h2.textContent = 'Label Text';
+      section.appendChild(h2);
+
+      // Text mode
+      const modes = document.createElement('div');
+      modes.className = 'lt-modes';
+      for (const m of data.modes) {
+        const b = document.createElement('button');
+        b.className = 'lt-btn' + (m === data.mode ? ' active' : '');
+        b.textContent = MODE_LABELS[m] || m;
+        b.addEventListener('click', async () => {
+          await setLT({ mode: m });
+          modes.querySelectorAll('.lt-btn').forEach(x => x.classList.toggle('active', x === b));
+        });
+        modes.appendChild(b);
+      }
+      section.appendChild(modes);
+
+      // Font
+      const fontSel = document.createElement('select');
+      fontSel.className = 'lt-font';
+      for (const f of data.fonts) {
+        const o = document.createElement('option');
+        o.value = f; o.textContent = f;
+        if (f === data.font) o.selected = true;
+        fontSel.appendChild(o);
+      }
+      fontSel.addEventListener('change', () => setLT({ font: fontSel.value }));
+      section.appendChild(labelRow('Font', fontSel));
+
+      // Artist / album text colors
+      section.appendChild(labelRow('Artist', ...colorControl(data.artist_color, v => setLT({ artist_color: v }))));
+      section.appendChild(labelRow('Album', ...colorControl(data.album_color, v => setLT({ album_color: v }))));
+
+      // Two decoration slots, each: critter + color
+      const decorSlot = (label, name, color, nameKey, colorKey) => {
+        const sel = document.createElement('select');
+        sel.className = 'lt-font';
+        for (const dn of data.decors) {
+          const o = document.createElement('option');
+          o.value = dn; o.textContent = cap(dn);
+          if (dn === name) o.selected = true;
+          sel.appendChild(o);
+        }
+        sel.addEventListener('change', () => setLT({ [nameKey]: sel.value }));
+        return labelRow(label, sel, ...colorControl(color, v => setLT({ [colorKey]: v })));
+      };
+      section.appendChild(decorSlot('Left', data.decor1, data.decor1_color, 'decor1', 'decor1_color'));
+      section.appendChild(decorSlot('Right', data.decor2, data.decor2_color, 'decor2', 'decor2_color'));
+
+      return section;
     }
 
     function renderLastfm(lfm) {
       const section = document.createElement('div');
       section.className = 'lastfm-section';
-      const h2 = document.createElement('h2');
-      h2.textContent = 'Last.fm';
+      const h2 = document.createElement('h2'); h2.textContent = 'Last.fm';
       section.appendChild(h2);
-
       if (!lfm.configured) {
-        const msg = document.createElement('div');
-        msg.className = 'lastfm-status';
+        const msg = document.createElement('div'); msg.className = 'lastfm-status';
         msg.textContent = 'Add api_key and api_secret to config.yml to enable scrobbling.';
-        section.appendChild(msg);
-        return section;
+        section.appendChild(msg); return section;
       }
-
       if (lfm.authenticated) {
-        const row = document.createElement('div');
-        row.className = 'lastfm-row';
-        const status = document.createElement('span');
-        status.className = 'lastfm-status';
-        status.innerHTML = 'Signed in as <span class="username">' +
-          lfm.username.replace(/</g, '&lt;') + '</span>';
-        row.appendChild(status);
-        section.appendChild(row);
-
-        // Enable/disable toggle
-        const toggleRow = document.createElement('div');
-        toggleRow.className = 'lastfm-row';
+        const row = document.createElement('div'); row.className = 'lastfm-row';
+        const status = document.createElement('span'); status.className = 'lastfm-status';
+        status.innerHTML = 'Signed in as <span class="username">' + lfm.username.replace(/</g, '&lt;') + '</span>';
+        row.appendChild(status); section.appendChild(row);
+        const toggleRow = document.createElement('div'); toggleRow.className = 'lastfm-row';
         const toggle = document.createElement('button');
         toggle.className = 'lastfm-toggle' + (lfm.enabled ? ' on' : '');
         toggle.addEventListener('click', async () => {
-          const newVal = !toggle.classList.contains('on');
-          toggle.classList.toggle('on', newVal);
-          await api('/api/settings/lastfm/toggle', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({enabled: newVal}),
-          });
+          const nv = !toggle.classList.contains('on');
+          toggle.classList.toggle('on', nv);
+          await post('/api/settings/lastfm/toggle', { enabled: nv });
         });
-        const toggleLabel = document.createElement('span');
-        toggleLabel.className = 'lastfm-status';
-        toggleLabel.textContent = 'Scrobbling';
-        toggleRow.appendChild(toggle);
-        toggleRow.appendChild(toggleLabel);
-        section.appendChild(toggleRow);
-
-        // Logout
+        const tl = document.createElement('span'); tl.className = 'lastfm-status'; tl.textContent = 'Scrobbling';
+        toggleRow.appendChild(toggle); toggleRow.appendChild(tl); section.appendChild(toggleRow);
         const logout = document.createElement('button');
-        logout.className = 'lastfm-btn danger';
-        logout.textContent = 'Sign out';
-        logout.addEventListener('click', async () => {
-          await api('/api/settings/lastfm/logout', {method: 'POST'});
-          location.reload();
-        });
+        logout.className = 'lastfm-btn danger'; logout.textContent = 'Sign out';
+        logout.addEventListener('click', async () => { await api('/api/settings/lastfm/logout', { method: 'POST' }); location.reload(); });
         section.appendChild(logout);
       } else {
-        const form = document.createElement('div');
-        form.className = 'lastfm-form';
-        const userInput = document.createElement('input');
-        userInput.type = 'text';
-        userInput.placeholder = 'Last.fm username';
-        const passInput = document.createElement('input');
-        passInput.type = 'password';
-        passInput.placeholder = 'Password';
-        const btn = document.createElement('button');
-        btn.className = 'lastfm-btn';
-        btn.textContent = 'Sign in';
-        const errEl = document.createElement('div');
-        errEl.className = 'lastfm-error';
+        const form = document.createElement('div'); form.className = 'lastfm-form';
+        const u = document.createElement('input'); u.type = 'text'; u.placeholder = 'Last.fm username';
+        const p = document.createElement('input'); p.type = 'password'; p.placeholder = 'Password';
+        const btn = document.createElement('button'); btn.className = 'lastfm-btn'; btn.textContent = 'Sign in';
+        const err = document.createElement('div'); err.className = 'lastfm-error';
         btn.addEventListener('click', async () => {
-          errEl.textContent = '';
-          btn.disabled = true;
-          btn.textContent = 'Signing in...';
-          try {
-            await api('/api/settings/lastfm/auth', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({username: userInput.value, password: passInput.value}),
-            });
-            location.reload();
-          } catch (e) {
-            errEl.textContent = 'Authentication failed';
-            btn.disabled = false;
-            btn.textContent = 'Sign in';
-          }
+          err.textContent = ''; btn.disabled = true; btn.textContent = 'Signing in...';
+          try { await post('/api/settings/lastfm/auth', { username: u.value, password: p.value }); location.reload(); }
+          catch { err.textContent = 'Authentication failed'; btn.disabled = false; btn.textContent = 'Sign in'; }
         });
-        form.appendChild(userInput);
-        form.appendChild(passInput);
-        form.appendChild(btn);
-        form.appendChild(errEl);
+        form.appendChild(u); form.appendChild(p); form.appendChild(btn); form.appendChild(err);
         section.appendChild(form);
       }
       return section;
     }
 
+    // --- Init ---
+
     async function init() {
-      const [styleRes, optRes, labelRes, labelOptRes, brightRes, lastfmRes] = await Promise.all([
+      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes] = await Promise.all([
         api('/api/settings/vinyl'),
         api('/api/settings/vinyl/options'),
         api('/api/settings/label'),
-        api('/api/settings/label/options'),
         api('/api/settings/brightness'),
         api('/api/settings/lastfm'),
+        api('/api/settings/label-text/options'),
       ]);
       currentStyle = styleRes.style;
-      currentStyleEl.textContent = currentStyle;
       currentLabel = labelRes.label;
+      currentStyleEl.textContent = currentStyle;
 
-      // Last.fm
-      container.appendChild(renderLastfm(lastfmRes));
+      // Drop the 'pattern' duplicates — picture-disc is derived as a role.
+      options = optRes.options.filter(o => o.category !== 'pattern');
 
-      // Brightness slider
-      const sliderSection = document.createElement('div');
-      sliderSection.className = 'slider-section';
-      const sliderH2 = document.createElement('h2');
-      sliderH2.textContent = 'Brightness';
-      sliderSection.appendChild(sliderH2);
-      const sliderRow = document.createElement('div');
-      sliderRow.className = 'slider-row';
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = '0';
-      slider.max = '100';
-      slider.value = String(brightRes.brightness);
-      const valSpan = document.createElement('span');
-      valSpan.className = 'slider-value';
-      valSpan.textContent = brightRes.brightness + '%';
-      slider.addEventListener('input', () => {
-        valSpan.textContent = slider.value + '%';
-      });
-      slider.addEventListener('change', () => {
-        setBrightness(parseInt(slider.value));
-      });
-      sliderRow.appendChild(slider);
-      sliderRow.appendChild(valSpan);
-      sliderSection.appendChild(sliderRow);
-      container.appendChild(sliderSection);
+      const byCat = (c) => options.filter(o => o.category === c).map(o => o.id);
+      pools.mandelbrot = byCat('mandelbrot');
+      pools.nebula = byCat('nebula');
+      pools.munafo = byCat('munafo');
+      pools.color = byCat('color');
+      randomPool = ['black', 'clear', 'picture']
+        .concat(pools.color, pools.mandelbrot, pools.nebula, pools.munafo)
+        .concat(pools.mandelbrot.map(x => 'pattern-' + x),
+                pools.nebula.map(x => 'pattern-' + x),
+                pools.munafo.map(x => 'pattern-' + x));
+      // Valid label targets: album art, any color, or any fractal.
+      labelPool = ['art'].concat(pools.color, pools.mandelbrot, pools.nebula, pools.munafo);
 
-      // Label options
-      const labelSection = document.createElement('div');
-      labelSection.className = 'section';
-      const labelH2 = document.createElement('h2');
-      labelH2.textContent = 'Center Label';
-      labelSection.appendChild(labelH2);
-      const labelGallery = document.createElement('div');
-      labelGallery.className = 'gallery';
-      for (const opt of labelOptRes.options) {
-        labelGallery.appendChild(renderLabelItem(opt));
-      }
-      labelSection.appendChild(labelGallery);
-      container.appendChild(labelSection);
-
-      // Vinyl style options
-      const options = optRes.options;
-
-      const categories = {
-        basic: {title: 'Basic', items: []},
-        color: {title: 'Colored', items: []},
-        mandelbrot: {title: 'Mandelbrot', items: []},
-        nebula: {title: 'Nebula', items: []},
-        munafo: {title: 'Munafo Deep-Zoom', items: []},
-        pattern: {title: 'Pattern Picture Disc', items: []},
-      };
-
-      for (const opt of options) {
-        const cat = categories[opt.category] || categories.basic;
-        cat.items.push(opt);
-      }
-
-      for (const [key, cat] of Object.entries(categories)) {
-        if (cat.items.length === 0) continue;
-        const section = document.createElement('div');
-        section.className = 'section';
-        const h2 = document.createElement('h2');
-        h2.textContent = cat.title;
-        section.appendChild(h2);
-
-        const gallery = document.createElement('div');
-        gallery.className = 'gallery';
-        for (const opt of cat.items) {
-          gallery.appendChild(renderItem(opt));
-        }
-        section.appendChild(gallery);
-        container.appendChild(section);
-      }
+      renderGalleries();
+      controlsRoot.appendChild(renderLabelText(labelTextRes));
+      controlsRoot.appendChild(renderBrightness(brightRes.brightness));
+      controlsRoot.appendChild(renderLastfm(lastfmRes));
     }
 
-    document.getElementById('back-btn').addEventListener('click', () => {
-      window.location.href = '/';
-    });
-
+    document.getElementById('back-btn').addEventListener('click', () => { window.location.href = '/'; });
     init();
   </script>
 </body>

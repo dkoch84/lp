@@ -118,10 +118,17 @@ main {
 
 .hidden { display: none !important; }
 
-#search {
-  display: block;
-  width: calc(100% - 40px);
+#artist-controls {
+  display: flex;
+  gap: 10px;
   margin: 16px 20px 0;
+}
+
+#artist-controls.hidden { display: none !important; }
+
+#search {
+  flex: 1;
+  min-width: 0;
   padding: 10px 14px;
   background: #222;
   border: 1px solid #333;
@@ -135,7 +142,73 @@ main {
   border-color: #555;
 }
 
-#search.hidden { display: none !important; }
+#sort {
+  padding: 10px 14px;
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 0.95rem;
+  outline: none;
+  cursor: pointer;
+}
+
+#sort:focus {
+  border-color: #555;
+}
+
+#album-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 16px 20px 0;
+}
+
+#album-controls.hidden { display: none !important; }
+
+#album-sort, #album-grid-select {
+  padding: 10px 14px;
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #eee;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+#album-sort:active, #album-grid-select:active { background: #2c2c2c; }
+
+#album-grid-select.active {
+  background: #2c3b56;
+  border-color: #4a7;
+  color: #bcd6ff;
+}
+
+/* Cover-selection mode: numbered badge + selected outline */
+.grid-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #2c6cff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.95rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.album-tile.selected .album-cover,
+.album-tile.selected .album-cover-placeholder {
+  outline: 3px solid #2c6cff;
+  outline-offset: -3px;
+}
+
+.album-tile.selecting:not(.selectable) { opacity: 0.45; }
 
 /* Shared grid for both artists and albums */
 .tile-grid {
@@ -149,11 +222,35 @@ main {
 .artist-tile {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
 }
 
 .artist-tile:active {
   opacity: 0.8;
 }
+
+.fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #888;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fav-btn:hover { color: #ffd24a; }
+.fav-btn.is-fav { color: #ffd24a; }
+
 
 .artist-collage {
   width: 100%;
@@ -172,6 +269,16 @@ main {
 .artist-collage.cols-2 {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr;
+}
+
+/* 3 covers: left half is one image, right half split into two stacked. */
+.artist-collage.cols-3 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.artist-collage.cols-3 img:first-child {
+  grid-row: 1 / 3;
 }
 
 .artist-collage.cols-4 {
@@ -213,6 +320,7 @@ main {
 .album-tile {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
 }
 
 .album-tile:active {

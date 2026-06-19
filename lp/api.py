@@ -17,6 +17,17 @@ class LabelRequest(BaseModel):
     label: str
 
 
+class LabelTextRequest(BaseModel):
+    mode: str = None
+    font: str = None
+    artist_color: str = None
+    album_color: str = None
+    decor1: str = None
+    decor1_color: str = None
+    decor2: str = None
+    decor2_color: str = None
+
+
 class BrightnessRequest(BaseModel):
     brightness: int
 
@@ -30,7 +41,20 @@ class LastfmToggleRequest(BaseModel):
     enabled: bool
 
 
-def create_app(player, library, static_dir, scrobbler=None, display=None):
+class FavoriteRequest(BaseModel):
+    favorite: bool
+
+
+class GridRequest(BaseModel):
+    folders: list[str]
+
+
+LABEL_TEXT_MODES = ['none', 'curved', 'straight', 'blocky']
+LABEL_TEXT_FONTS = ['georgia', 'dejavuserif', 'dejavusans', 'dejavusansmono',
+                    'oswald', 'bebasneue', 'notoserif', 'notosans', 'ubuntu', 'cantarell']
+
+
+def create_app(player, library, static_dir, scrobbler=None, display=None, state=None):
     app = FastAPI(title="lp")
 
     @app.post("/api/share")
@@ -51,20 +75,52 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
 
     # --- Library browsing ---
 
+    def _artist_covers(a):
+        """Folder names for the artist's collage: a user-chosen selection if
+        set (filtered to covers that still exist), else the first 4 with art."""
+        default = [al.folder_name for al in a.albums if al.cover_path][:4]
+        if state:
+            saved = state.get_grid_covers(a.name)
+            if saved:
+                have = {al.folder_name for al in a.albums if al.cover_path}
+                sel = [f for f in saved if f in have][:4]
+                if sel:
+                    return sel
+        return default
+
     @app.get("/api/artists")
     def list_artists():
         return [
             {
                 "name": a.name,
                 "album_count": len(a.albums),
-                "covers": [
-                    album.folder_name
-                    for album in a.albums[:4]
-                    if album.cover_path
-                ],
+                "covers": _artist_covers(a),
+                "favorite": state.is_favorite(a.name) if state else False,
+                "last_played": state.get_last_played(a.name) if state else None,
             }
             for a in library.get_artists()
         ]
+
+    @app.post("/api/artists/{name}/grid")
+    def set_grid_covers(name: str, req: GridRequest):
+        if not state:
+            raise HTTPException(503, "state not available")
+        artist = library.get_artist(name)
+        if not artist:
+            raise HTTPException(404, "Artist not found")
+        have = {al.folder_name for al in artist.albums if al.cover_path}
+        sel = [f for f in req.folders if f in have][:4]  # validate + cap at 4
+        state.set_grid_covers(name, sel)
+        return {"name": name, "covers": sel}
+
+    @app.post("/api/artists/{name}/favorite")
+    def set_favorite(name: str, req: FavoriteRequest):
+        if not state:
+            raise HTTPException(503, "state not available")
+        if not library.get_artist(name):
+            raise HTTPException(404, "Artist not found")
+        state.set_favorite(name, req.favorite)
+        return {"name": name, "favorite": req.favorite}
 
     @app.get("/api/artists/{name}/albums")
     def artist_albums(name: str):
@@ -83,15 +139,26 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
         ]
 
     @app.get("/api/albums/{artist}/{folder}/cover")
-    def album_cover(artist: str, folder: str):
+    def album_cover(artist: str, folder: str, size: str = None):
         artist_obj = library.get_artist(artist)
         if not artist_obj:
             raise HTTPException(404, "Artist not found")
+        # Covers rarely change; let the browser hold them for a week so repeat
+        # navigation doesn't refetch (or even revalidate) every tile.
+        cache = {"Cache-Control": "public, max-age=604800"}
         for album in artist_obj.albums:
             if album.folder_name == folder:
-                if album.cover_path and os.path.isfile(album.cover_path):
-                    return FileResponse(album.cover_path)
-                raise HTTPException(404, "No cover art")
+                if not (album.cover_path and os.path.isfile(album.cover_path)):
+                    raise HTTPException(404, "No cover art")
+                # Grid tiles request a small thumbnail instead of the full,
+                # often multi-megabyte, original.
+                if size == "thumb":
+                    from lp.thumbs import get_thumbnail
+                    data = get_thumbnail(album.cover_path)
+                    if data:
+                        return Response(content=data, media_type="image/jpeg",
+                                        headers=cache)
+                return FileResponse(album.cover_path, headers=cache)
         raise HTTPException(404, "Album not found")
 
     @app.get("/api/albums/{artist}/{folder}/tracks")
@@ -113,6 +180,8 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
         if not album:
             raise HTTPException(400, "Album path not in library")
         player.play_album(req.path)
+        if state:
+            state.mark_played(album.artist)
         return {"status": "playing", "album": album.display_name}
 
     @app.post("/api/stop")
@@ -256,10 +325,11 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
 
     @app.post("/api/settings/label")
     def set_label(req: LabelRequest):
-        from lp.display import (LABEL_COLORS, MANDELBROT_VARIANTS,
+        from lp.display import (LABEL_COLORS, VINYL_COLORS, MANDELBROT_VARIANTS,
                                 NEBULA_VARIANTS, MUNAFO_VARIANTS)
         valid = (['art']
-                 + ['label-' + c for c in LABEL_COLORS]
+                 + ['color-' + c for c in VINYL_COLORS]
+                 + ['label-' + c for c in LABEL_COLORS]  # legacy, still accepted
                  + ['mandelbrot-' + v[4] + '-' + v[5] for v in MANDELBROT_VARIANTS]
                  + ['nebula-' + v[2] for v in NEBULA_VARIANTS]
                  + ['munafo-' + v[0] for v in MUNAFO_VARIANTS])
@@ -290,6 +360,65 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
                             'category': 'munafo'})
         return {'options': options}
 
+    # --- Label text (mode + font) ---
+
+    def _label_text_state():
+        p = player
+        return {"mode": p.vinyl_label_text, "font": p.vinyl_label_font,
+                "artist_color": p.vinyl_label_artist_color,
+                "album_color": p.vinyl_label_album_color,
+                "decor1": p.vinyl_label_decor1, "decor1_color": p.vinyl_label_decor1_color,
+                "decor2": p.vinyl_label_decor2, "decor2_color": p.vinyl_label_decor2_color}
+
+    def _valid_color(c):
+        return c == 'auto' or (isinstance(c, str) and len(c) == 7 and c[0] == '#')
+
+    @app.get("/api/settings/label-text")
+    def get_label_text():
+        return _label_text_state()
+
+    @app.post("/api/settings/label-text")
+    def set_label_text(req: LabelTextRequest):
+        from lp.display import DECOR_EMOJI
+        decor_vals = ['none', 'random'] + list(DECOR_EMOJI)
+        if req.mode is not None:
+            if req.mode not in LABEL_TEXT_MODES:
+                raise HTTPException(400, f"Invalid mode. Choose from: {', '.join(LABEL_TEXT_MODES)}")
+            player.vinyl_label_text = req.mode
+        if req.font is not None:
+            player.vinyl_label_font = req.font
+        for field, val in (('vinyl_label_artist_color', req.artist_color),
+                           ('vinyl_label_album_color', req.album_color),
+                           ('vinyl_label_decor1_color', req.decor1_color),
+                           ('vinyl_label_decor2_color', req.decor2_color)):
+            if val is not None:
+                if not _valid_color(val):
+                    raise HTTPException(400, f"Invalid color: {val}")
+                setattr(player, field, val)
+        for field, val in (('vinyl_label_decor1', req.decor1),
+                           ('vinyl_label_decor2', req.decor2)):
+            if val is not None:
+                if val not in decor_vals:
+                    raise HTTPException(400, f"Invalid decor. Choose from: {', '.join(decor_vals)}")
+                setattr(player, field, val)
+        return _label_text_state()
+
+    @app.get("/api/settings/label-text/options")
+    def get_label_text_options():
+        from lp.display import DECOR_EMOJI
+        fonts = LABEL_TEXT_FONTS
+        try:
+            import pygame.font as _pf
+            _pf.init()
+            avail = [f for f in LABEL_TEXT_FONTS if _pf.match_font(f)]
+            if avail:
+                fonts = avail
+        except Exception:
+            pass
+        return {"modes": LABEL_TEXT_MODES, "fonts": fonts,
+                "decors": ['none', 'random'] + list(DECOR_EMOJI),
+                **_label_text_state()}
+
     # --- Brightness settings ---
 
     @app.get("/api/settings/brightness")
@@ -308,6 +437,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
     @app.post("/api/library/rescan")
     def rescan():
         library.scan()
+        _prewarm_thumbs()  # warm thumbnails for any newly-found covers
         return {"artists": len(library.artists), "albums": len(library.albums_by_path)}
 
     # --- Last.fm ---
@@ -341,6 +471,15 @@ def create_app(player, library, static_dir, scrobbler=None, display=None):
             raise HTTPException(400, "Scrobbler not initialized")
         scrobbler.enabled = req.enabled
         return scrobbler.get_status()
+
+    # --- Thumbnail prewarm ---
+    # Warm the album-art thumbnail cache in the background so the very first
+    # browse is fast, not just repeat visits.
+    def _prewarm_thumbs():
+        from lp.thumbs import start_prewarm
+        start_prewarm(a.cover_path for a in library.albums_by_path.values())
+
+    _prewarm_thumbs()
 
     # --- Static files ---
 

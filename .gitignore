@@ -13,3 +13,5 @@ lp/cache/
 # runtime. The 9000×9000 gold archives live in the bongsweat repo.
 !lp/cache/munafo/
 !lp/cache/munafo/*.png
+.lp_state.json
+image.png

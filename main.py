@@ -9,6 +9,7 @@ from lp.player import PlayerBackend
 from lp.library import Library
 from lp.api import create_app
 from lp.scrobbler import Scrobbler
+from lp.state import UserState
 
 
 def main():
@@ -34,14 +35,18 @@ def main():
     library = Library(music_path)
     lastfm_config = config.get('lastfm', {})
     scrobbler = Scrobbler(player, lastfm_config)
+    state_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '.lp_state.json'
+    )
+    state = UserState(state_path)
 
     if args.no_display:
-        app = create_app(player, library, static_dir, scrobbler)
+        app = create_app(player, library, static_dir, scrobbler, state=state)
         uvicorn.run(app, host=host, port=port, log_level="info")
     else:
         from lp.display import Display
         display = Display(config, player, port)
-        app = create_app(player, library, static_dir, scrobbler, display)
+        app = create_app(player, library, static_dir, scrobbler, display, state)
         api_thread = threading.Thread(
             target=uvicorn.run,
             args=(app,),
