@@ -33,6 +33,25 @@ LABEL_COLORS = {
 }
 NEEDLE_COLOR = (200, 200, 200)
 
+# Little decorative critters for the label's empty spaces (rendered via the
+# Noto Color Emoji font). 2 per label.
+DECOR_EMOJI = {
+    'bird': '🐦', 'dove': '🕊', 'owl': '🦉',
+    'sun': '☀', 'moon': '🌙', 'star': '⭐',
+    'octopus': '🐙', 'fish': '🐟',
+    'beaver': '🦫', 'dog': '🐕', 'cat': '🐈',
+}
+
+
+def _resolve_color(val, fallback):
+    """'auto'/None → fallback accent; '#rrggbb' → rgb tuple."""
+    if isinstance(val, str) and val.startswith('#') and len(val) == 7:
+        try:
+            return (int(val[1:3], 16), int(val[3:5], 16), int(val[5:7], 16))
+        except ValueError:
+            pass
+    return tuple(fallback[:3])
+
 # Record geometry (as fraction of record radius)
 OUTER_GROOVE = 0.92
 INNER_GROOVE = 0.35
@@ -65,6 +84,7 @@ VINYL_COLORS = {
     'rust':         (210, 105, 55),
     'lavender':     (180, 120, 220),
     'midnight':     (75, 60, 210),
+    'cyan':         (11, 187, 208),
 }
 
 # Per-variant groove + track-mark appearance — (groove_rgba, track_rgba).
@@ -84,6 +104,7 @@ VINYL_GROOVE_COLORS = {
     'rose':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
     'copper':     ((0, 0, 0, 9),        (0, 0, 0, 36)),
     'rust':       ((0, 0, 0, 10),       (0, 0, 0, 40)),
+    'cyan':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
     # Dark bodies — light additive shine
     'red':        ((255, 255, 255, 35), (255, 255, 255, 45)),
     'navy':       ((255, 255, 255, 35), (255, 255, 255, 45)),
@@ -363,6 +384,47 @@ def _nebula_cream_rose(br, blend, t1, t2, t3, hs):
             b1 * blend + b2 * (1 - blend))
 
 
+def _nebula_diamond_morning(br, blend, t1, t2, t3, hs):
+    # Soft pink dawn clouds: rosy pink puffs over a pale pink-cream sky with
+    # just a hint of blue. Kept airy/pastel (high base) for a dreamy label look.
+    base = 0.88 + 0.12 * br
+    # Very light, airy pink cloud tone (lots of white in it)
+    r1 = base * (253 + 2 * t1)
+    g1 = base * (226 + 14 * hs)
+    b1 = base * (233 + 12 * t3)
+    # Clear sky-blue in the gaps between clouds (matches the album's sky)
+    r2 = base * (156 + 30 * t3)
+    g2 = base * (210 + 16 * hs)
+    b2 = base * (238 + 14 * t1)
+    return (r1 * blend + r2 * (1 - blend),
+            g1 * blend + g2 * (1 - blend),
+            b1 * blend + b2 * (1 - blend))
+
+
+def _clouds_palette(cloud, sky):
+    """Build a soft-clouds palette function from a (cloud_rgb, sky_rgb) pair.
+
+    Same airy structure as _nebula_diamond_morning — clouds at high blend, sky
+    in the gaps — just parameterized by color so we can spin up colorways.
+    """
+    cr, cg, cb = cloud
+    sr, sg, sb = sky
+
+    def fn(br, blend, t1, t2, t3, hs):
+        base = 0.88 + 0.12 * br
+        r1 = base * (cr + 2 * t1)
+        g1 = base * (cg + 14 * hs)
+        b1 = base * (cb + 12 * t3)
+        r2 = base * (sr + 30 * t3)
+        g2 = base * (sg + 16 * hs)
+        b2 = base * (sb + 14 * t1)
+        return (r1 * blend + r2 * (1 - blend),
+                g1 * blend + g2 * (1 - blend),
+                b1 * blend + b2 * (1 - blend))
+
+    return fn
+
+
 def _nebula_marble(br, blend, t1, t2, t3, hs):
     base = 0.35 + 0.65 * br
     r1 = base * (230 + 25 * hs)
@@ -520,6 +582,18 @@ NEBULA_VARIANTS = [
     (63, _nebula_cream_green,    'cream-green',    1.2, 6, 7),
     (31, _nebula_bone,           'bone',           1.1, 6, 7),
     (17, _nebula_cream_rose,     'cream-rose',     1.2, 6, 7),
+    (28, _nebula_diamond_morning,'diamond-morning',1.25, 6, 7, 'clouds'),
+    (71, _clouds_palette((254, 206, 178), (158, 168, 214)), 'sunset-peach',  1.2, 6, 7, 'clouds'),
+    (12, _clouds_palette((226, 208, 240), (160, 182, 234)), 'lavender-dusk', 1.2, 6, 7, 'clouds'),
+    (90, _clouds_palette((214, 240, 222), (164, 214, 236)), 'mint-sky',      1.2, 6, 7, 'clouds'),
+    (5,  _clouds_palette((252, 214, 204), (188, 196, 224)), 'rose-gold',     1.2, 6, 7, 'clouds'),
+    (60, _clouds_palette((232, 230, 236), (146, 160, 182)), 'storm-grey',    1.15, 6, 7, 'clouds'),
+    (33, _clouds_palette((250, 205, 232), (190, 200, 245)), 'cotton-candy',  1.2, 6, 7, 'clouds'),
+    (47, _clouds_palette((252, 236, 196), (176, 208, 226)), 'butter-cream',  1.2, 6, 7, 'clouds'),
+    (19, _clouds_palette((206, 240, 230), (150, 200, 220)), 'seafoam',       1.2, 6, 7, 'clouds'),
+    (8,  _clouds_palette((252, 196, 168), (150, 150, 200)), 'ember-dusk',    1.2, 6, 7, 'clouds'),
+    (52, _clouds_palette((224, 196, 226), (168, 170, 214)), 'plum-wine',     1.2, 6, 7, 'clouds'),
+    (64, _clouds_palette((222, 240, 248), (150, 192, 224)), 'arctic',        1.2, 6, 7, 'clouds'),
     (88, _nebula_marble,         'marble',         1.2, 6, 7),
     (42, _nebula_galaxy,         'galaxy',         1.6, 6, 7),
     (71, _nebula_galaxy_warm,    'galaxy-warm',    1.5, 6, 7),
@@ -543,6 +617,18 @@ NEBULA_GROOVE_COLORS = {
     'cream-green':    ((0, 0, 0, 22), (0, 0, 0, 44)),
     'bone':           ((0, 0, 0, 18), (0, 0, 0, 36)),
     'cream-rose':     ((0, 0, 0, 22), (0, 0, 0, 44)),
+    'diamond-morning':((0, 0, 0, 16), (0, 0, 0, 32)),
+    'sunset-peach':   ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'lavender-dusk':  ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'mint-sky':       ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'rose-gold':      ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'storm-grey':     ((0, 0, 0, 18), (0, 0, 0, 36)),
+    'cotton-candy':   ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'butter-cream':   ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'seafoam':        ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'ember-dusk':     ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'plum-wine':      ((0, 0, 0, 16), (0, 0, 0, 32)),
+    'arctic':         ((0, 0, 0, 16), (0, 0, 0, 32)),
     'marble':         ((0, 0, 0, 22), (0, 0, 0, 44)),
     'galaxy':         ((255, 255, 255, 22), (255, 255, 255, 45)),
     'galaxy-warm':    ((0, 0, 0, 30), (0, 0, 0, 56)),
@@ -556,9 +642,69 @@ NEBULA_GROOVE_COLORS = {
 }
 
 
+def _render_clouds_surface(variant, size, cells=2.6, octaves=4):
+    """Render soft painterly clouds at FULL resolution (no half-res upscale, so
+    it's crisp not blurry): pink clouds up top fading to clear blue sky below,
+    with sunlit white tops. `cells` controls how many cloud masses span the disc
+    (lower = calmer); `octaves` adds fine wisp detail.
+    """
+    seed, palette_fn, _name, sat = variant[:4]
+    grids = _make_nebula_grids(seed)
+
+    d = size * 2
+    py, px = np.mgrid[0:d, 0:d].astype(np.float64)
+    dx = px - size
+    dy = py - size
+    dist = np.sqrt(dx * dx + dy * dy)
+
+    nx = px / d * cells
+    ny = py / d * cells
+    c1 = _fbm(nx, ny, octaves, 0, grids)
+    c2 = _fbm(nx + 5.0, ny + 5.0, octaves, 3, grids)
+
+    # fBm sits roughly in [0.2, 0.75]; stretch to span 0..1 for full contrast.
+    t1 = np.clip((c1 - 0.25) * 2.4, 0.0, 1.0)
+    t3 = np.clip((c2 - 0.25) * 2.4, 0.0, 1.0)
+    brightness = np.clip(0.6 + 0.45 * t1, 0.0, 1.0)
+
+    # Reads as clouds, not a gradient: cloud DENSITY drives most of the pink,
+    # with a gentle top-pink / bottom-blue lean.
+    vert = py / float(d)                          # 0 = top, 1 = bottom
+    pinkness = t1 * 1.3 + (1.0 - vert) * 0.95 + 0.28
+    blend = _smoothstep(np.clip(pinkness, 0.0, 1.0))
+
+    r, g, b = palette_fn(brightness, blend, t1, t3, t3, t3)
+
+    avg = (r + g + b) / 3.0
+    r = avg + (r - avg) * sat
+    g = avg + (g - avg) * sat
+    b = avg + (b - avg) * sat
+
+    # Faint lift on the densest wisps only — keep them light pink, not a white
+    # blob (small, high threshold, low strength).
+    hi = np.clip((t1 - 0.75) * 3.0, 0.0, 1.0) ** 1.6
+    r = r + (255 - r) * hi * 0.22
+    g = g + (255 - g) * hi * 0.22
+    b = b + (255 - b) * hi * 0.22
+
+    # Anti-aliased disc edge (1px soft rim), full-resolution alpha.
+    alpha = np.clip(size - dist + 0.5, 0.0, 1.0)
+    a = (alpha * 255.0).astype(np.uint8)
+    r = np.clip(r, 0, 255).astype(np.uint8)
+    g = np.clip(g, 0, 255).astype(np.uint8)
+    b = np.clip(b, 0, 255).astype(np.uint8)
+
+    rgba = np.stack([r, g, b, a], axis=-1).tobytes()
+    return pygame.image.frombuffer(rgba, (d, d), 'RGBA').copy()
+
+
 def _render_nebula_surface(variant, size):
     """Render a nebula-style vinyl disc. Vectorized over the full pixel grid."""
-    seed, palette_fn, _name, sat, warp_oct, arm_oct = variant
+    seed, palette_fn, _name, sat, warp_oct, arm_oct = variant[:6]
+    # Some variants opt into the soft-clouds renderer instead of the swirly
+    # nebula look (7th tuple element == 'clouds').
+    if len(variant) > 6 and variant[6] == 'clouds':
+        return _render_clouds_surface(variant, size)
     grids = _make_nebula_grids(seed)
 
     d = size * 2
@@ -975,6 +1121,8 @@ class Display:
         self._record_texture_key = None
         self._grooves_texture = None
         self._grooves_texture_key = None
+        self._shine_texture = None
+        self._shine_texture_key = None
         self._text_cache = {}
         self._needle_tex = None
 
@@ -1271,6 +1419,120 @@ class Display:
 
         surf.blit(tmp, (cx - label_r, cy - label_r))
 
+    @staticmethod
+    def _draw_label_decor(surf, cx, cy, label_r, slots, seed=0, vertical=False):
+        """Place monochrome critter silhouettes in the label's empty spaces — one
+        per slot. `vertical` puts them top/bottom (for centered straight/blocky
+        text); otherwise left/right (for curved top/bottom text). `slots` is up
+        to two (name, rgb) pairs; name may be a critter, 'random', or 'none'."""
+        path = pygame.font.match_font('notoemoji')   # monochrome outline glyphs
+        if not path:
+            return
+        font = pygame.font.Font(path, 96)
+        target = max(8, int(label_r * 0.42))
+        if vertical:
+            off = int(label_r * 0.62)
+            positions = [(cx, cy - off), (cx, cy + off)]   # 12 and 6 o'clock
+        else:
+            off = int(label_r * 0.5)
+            positions = [(cx - off, cy), (cx + off, cy)]   # 9 and 3 o'clock
+        rng = random.Random(seed)
+        for (name, col), (sx, sy) in zip(slots, positions):
+            if not name or name == 'none':
+                continue
+            if name == 'random':
+                name = rng.choice(list(DECOR_EMOJI))
+            if name not in DECOR_EMOJI:
+                continue
+            try:
+                g = font.render(DECOR_EMOJI[name], True, tuple(col[:3]))
+            except Exception:
+                continue
+            g = pygame.transform.smoothscale(g, (target, target))
+            surf.blit(g, g.get_rect(center=(sx, sy)))
+
+    @staticmethod
+    def _draw_arc_text(surf, cx, cy, radius, text, font, color, top=True):
+        """Blit `text` curved along a circle arc, centered at top or bottom."""
+        if not text:
+            return
+        glyphs = [(ch, font.render(ch, True, color)) for ch in text]
+        widths = [g.get_width() for _, g in glyphs]
+        gap = max(1, int(font.get_height() * 0.06))
+        total_w = sum(widths) + gap * (len(text) - 1)
+        total_ang = total_w / float(radius)
+        if top:
+            a = -math.pi / 2 - total_ang / 2.0   # start left of top center
+            step = 1.0
+        else:
+            a = math.pi / 2 + total_ang / 2.0     # start left of bottom center
+            step = -1.0
+        for (ch, g), w in zip(glyphs, widths):
+            char_ang = w / float(radius)
+            ca = a + step * char_ang / 2.0
+            px = cx + radius * math.cos(ca)
+            py = cy + radius * math.sin(ca)
+            deg = -(math.degrees(ca) + 90) if top else -(math.degrees(ca) - 90)
+            rot = pygame.transform.rotate(g, deg)
+            surf.blit(rot, rot.get_rect(center=(int(px), int(py))))
+            a += step * (char_ang + gap / float(radius))
+
+    @staticmethod
+    def _draw_label_text(surf, cx, cy, label_r, accent_c, artist=None, album=None,
+                         mode='curved', font_name='serif',
+                         artist_color=None, album_color=None):
+        """Real artist/album text on a colored label.
+
+        mode: 'none'     — no text at all (blank label)
+              'curved'   — artist on the top arc, album on the bottom arc
+              'straight'  — centered horizontal lines
+              'blocky'    — centered, heavy/condensed block lettering
+        Falls back to abstract chickenscratch when there's no metadata.
+        """
+        if mode == 'none':
+            return
+        if not artist and not album:
+            Display._draw_fake_label_text(surf, cx, cy, label_r, accent_c)
+            return
+        d = label_r * 2
+        tmp = pygame.Surface((d, d), pygame.SRCALPHA)
+        lx, ly = label_r, label_r
+        ring_col = (*accent_c[:3], 60)
+        a_col = (*(artist_color or accent_c[:3]), 235)
+        b_col = (*(album_color or accent_c[:3]), 235)
+        pygame.font.init()
+
+        if mode == 'curved':
+            pygame.draw.circle(tmp, ring_col, (lx, ly), int(label_r * 0.92), 1)
+            font = pygame.font.SysFont(font_name, max(8, int(label_r * 0.15)), bold=True)
+            text_r = int(label_r * 0.74)
+            if artist:
+                Display._draw_arc_text(tmp, lx, ly, text_r, artist.upper(), font, a_col, top=True)
+            if album:
+                Display._draw_arc_text(tmp, lx, ly, text_r, album.upper(), font, b_col, top=False)
+        else:
+            blocky = mode == 'blocky'
+            fs = int(label_r * (0.22 if blocky else 0.17))
+            font = pygame.font.SysFont(font_name, max(8, fs), bold=True)
+            lines = [(t.upper(), c) for t, c in ((artist, a_col), (album, b_col)) if t]
+            rendered = []
+            maxw = int(label_r * 1.45)
+            for ln, c in lines:
+                g = font.render(ln, True, c)
+                if g.get_width() > maxw:   # shrink long names proportionally (no squish)
+                    sc = maxw / g.get_width()
+                    g = pygame.transform.smoothscale(
+                        g, (maxw, max(1, int(g.get_height() * sc))))
+                rendered.append(g)
+            gap = int(label_r * (0.20 if blocky else 0.16))   # roomy artist↔album gap
+            total_h = sum(g.get_height() for g in rendered) + gap * (len(rendered) - 1)
+            y = ly - total_h // 2
+            for g in rendered:
+                tmp.blit(g, g.get_rect(midtop=(lx, y)))
+                y += g.get_height() + gap
+
+        surf.blit(tmp, (cx - label_r, cy - label_r))
+
     def _get_vinyl_style(self, album_path):
         """Get or compute vinyl style for current album."""
         override = self.player.vinyl_style
@@ -1281,7 +1543,8 @@ class Display:
             self._current_vinyl_style = _pick_vinyl_style(album_path, override) if album_path else None
         return self._current_vinyl_style
 
-    def _build_record(self, size, boundaries, album_dur, art_path=None, album_path=None):
+    def _build_record(self, size, boundaries, album_dur, art_path=None, album_path=None,
+                      artist=None, album=None):
         """Build the vinyl record body (no grooves/track marks — those go on the overlay)."""
         d = size * 2
         surf = pygame.Surface((d, d), pygame.SRCALPHA)
@@ -1303,7 +1566,7 @@ class Display:
             self._draw_clear_vinyl(surf, size, center)
         elif style_type == 'color':
             base = VINYL_COLORS.get(style.get('color'), VINYL_BLACK[0])
-            pygame.draw.circle(surf, base, center, size)
+            self._draw_color_vinyl(surf, size, center, base)
         elif style_type == 'mandelbrot':
             variant = style['variant']
             self._draw_mandelbrot_vinyl(surf, size, center, variant)
@@ -1334,39 +1597,75 @@ class Display:
         if style_type not in ('picture', 'pattern'):
             label_r = int(size * LABEL_RADIUS)
             label_setting = self.player.vinyl_label
+            text_mode = self.player.vinyl_label_text
+            text_font = self.player.vinyl_label_font
+
+            # Text + decorations render over EVERY label type except the
+            # full-disc picture/pattern styles (handled by the outer guard).
+            # Solid labels get an accent derived from their color; image labels
+            # (album art / fractal / julia) get a light default for 'auto'.
+            IMG_ACCENT = (245, 245, 245)
+            is_image = False
 
             if label_setting == 'art':
                 label_art = self._get_label_art(art_path, label_r) if art_path else None
                 if label_art:
                     surf.blit(label_art, (size - label_r, size - label_r))
+                    label_accent, is_image = IMG_ACCENT, True
                 else:
                     pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
-                    self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
-            elif label_setting.startswith('label-'):
-                color_name = label_setting[len('label-'):]
-                main_c, accent_c = LABEL_COLORS.get(color_name, (VINYL_LABEL, VINYL_LABEL_DARK))
+                    label_accent = VINYL_LABEL_DARK
+            elif label_setting.startswith('color-'):
+                # Any vinyl color doubles as a label color (unified palette).
+                color_name = label_setting[len('color-'):]
+                main_c = VINYL_COLORS.get(color_name, VINYL_LABEL)
+                label_accent = tuple(int(c * 0.55) for c in main_c)
                 pygame.draw.circle(surf, main_c, center, label_r)
-                self._draw_fake_label_text(surf, size, size, label_r, accent_c)
+            elif label_setting.startswith('label-'):
+                # Legacy label-color palette (superseded by color-*).
+                color_name = label_setting[len('label-'):]
+                main_c, label_accent = LABEL_COLORS.get(color_name, (VINYL_LABEL, VINYL_LABEL_DARK))
+                pygame.draw.circle(surf, main_c, center, label_r)
             elif label_setting.startswith('julia-'):
-                name = label_setting[len('julia-'):]
-                jl = self._get_julia_label(name, label_r)
+                jl = self._get_julia_label(label_setting[len('julia-'):], label_r)
                 if jl:
                     surf.blit(jl, (size - label_r, size - label_r))
+                    label_accent, is_image = IMG_ACCENT, True
                 else:
                     pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
-                    self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
+                    label_accent = VINYL_LABEL_DARK
             elif (label_setting.startswith('mandelbrot-')
                   or label_setting.startswith('nebula-')
                   or label_setting.startswith('munafo-')):
                 fl = self._get_pattern_label(label_setting, label_r)
                 if fl:
                     surf.blit(fl, (size - label_r, size - label_r))
+                    label_accent, is_image = IMG_ACCENT, True
                 else:
                     pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
-                    self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
+                    label_accent = VINYL_LABEL_DARK
             else:
                 pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
-                self._draw_fake_label_text(surf, size, size, label_r, VINYL_LABEL_DARK)
+                label_accent = VINYL_LABEL_DARK
+
+            p = self.player
+            vertical = text_mode in ('straight', 'blocky')
+            # Don't scribble fake chickenscratch over an image label; real text
+            # (when there's metadata) and decorations are fine everywhere.
+            if artist or album or not is_image:
+                artist_col = _resolve_color(p.vinyl_label_artist_color, label_accent)
+                album_col = _resolve_color(p.vinyl_label_album_color, label_accent)
+                self._draw_label_text(surf, size, size, label_r, label_accent,
+                                      artist, album, text_mode, text_font,
+                                      artist_col, album_col)
+            d1, d2 = p.vinyl_label_decor1, p.vinyl_label_decor2
+            if (d1 and d1 != 'none') or (d2 and d2 != 'none'):
+                slots = [
+                    (d1, _resolve_color(p.vinyl_label_decor1_color, label_accent)),
+                    (d2, _resolve_color(p.vinyl_label_decor2_color, label_accent)),
+                ]
+                seed = abs(hash(album_path or '')) % (1 << 30)
+                self._draw_label_decor(surf, size, size, label_r, slots, seed, vertical)
 
         # Spindle hole
         pygame.draw.circle(surf, DARK_BG, center, int(size * 0.04))
@@ -1449,6 +1748,77 @@ class Display:
             del arr
 
         return surf, blend_mode
+
+    # Screen-fixed specular shine. Drawn at a CONSTANT angle on top of the
+    # rotating body + grooves, so the room-light reflection stays put while the
+    # record spins — light doesn't rotate with the disc. White + additive, so
+    # it reads as a highlight over any body color/art/fractal.
+    # A narrow specular streak, alpha-blended toward white (NOT additive, so it
+    # never blows out a bright body like the clear platter). Fixed in screen
+    # space and applied to all styles.
+    _SHINE_PARAMS = dict(
+        streak_x_frac     = -0.05,
+        streak_angle_deg  = 15.0,   # 11:30→5:30 tilt (slight top-left lean)
+        streak_core_width = 0.06,   # tight bright core
+        streak_core_alpha = 0.28,
+        streak_halo_width = 0.16,   # modest soft halo
+        streak_halo_alpha = 0.10,
+    )
+    # Per-style gloss: vinyl is glossy across the board, but album-art /
+    # fractal faces get a lighter touch so detail isn't blown out.
+    _GLOSS_BY_TYPE = {
+        'clear': 1.0, 'color': 0.95, 'black': 0.7,
+        'mandelbrot': 0.7, 'nebula': 0.7, 'munafo': 0.7,
+        'picture': 0.55, 'pattern': 0.65,
+    }
+
+    def _build_shine_overlay(self, size, style):
+        """Build the fixed specular shine overlay (white RGBA, additive blend).
+
+        Returns a surface to draw at angle=0 over the spinning record.
+        """
+        p = self._SHINE_PARAMS
+        gloss = self._GLOSS_BY_TYPE.get((style or {}).get('type', 'black'), 0.7)
+        d = size * 2
+        cx = cy = size
+
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+        in_disc = np.clip(size - r + 0.5, 0.0, 1.0)
+
+        # Tilted specular streak (window reflection) — broad core + wide halo,
+        # full-height column (matches the original clear-vinyl streak).
+        ang = np.deg2rad(p['streak_angle_deg'])
+        u = (dx - size * p['streak_x_frac']) * np.cos(ang) - dy * np.sin(ang)
+        core = np.exp(-(u / (size * p['streak_core_width'])) ** 2) * p['streak_core_alpha']
+        halo = np.exp(-(u / (size * p['streak_halo_width'])) ** 2) * p['streak_halo_alpha']
+        streak = core + halo
+
+        alpha_frac = np.clip(streak * gloss, 0.0, 1.0) * in_disc
+
+        # Don't shine over the center label — it's paper, not glossy vinyl.
+        # Picture / pattern discs have no label (body runs edge-to-edge).
+        if (style or {}).get('type', 'black') not in ('picture', 'pattern'):
+            label_r = size * LABEL_RADIUS
+            outside_label = np.clip(r - label_r + 0.5, 0.0, 1.0)
+            alpha_frac = alpha_frac * outside_label
+
+        brightness = self.player.vinyl_brightness
+        if brightness < 100:
+            alpha_frac = alpha_frac * (brightness / 100.0)
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = 255
+        rgba[..., 1] = 255
+        rgba[..., 2] = 255
+        rgba[..., 3] = (alpha_frac * 255.0).astype(np.uint8)
+
+        surf = pygame.Surface((d, d), pygame.SRCALPHA)
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0))
+        return surf
 
     @staticmethod
     def _draw_specular_highlight(surf, size, center, color, highlight_angle=-np.pi * 0.35):
@@ -1593,6 +1963,45 @@ class Display:
         base, _, _ = VINYL_BLACK
         pygame.draw.circle(surf, base, center, size)
 
+    # Colored-vinyl body. Flat fill reads dull, so we brighten the pigment and
+    # add a radial rim vignette for a domed look. Both are rotation-invariant
+    # (the directional/specular "shine" is a separate fixed overlay — see
+    # _build_shine_overlay — so light doesn't spin with the disc).
+    _COLOR_PARAMS = dict(
+        lift        = 0.18,   # brighten body toward white (overall pop)
+        edge_darken = 0.20,   # vignette at the rim for a domed look
+    )
+
+    def _draw_color_vinyl(self, surf, size, center, base, **overrides):
+        """Draw a brightened colored-vinyl base disc (radial shading only)."""
+        p = {**self._COLOR_PARAMS, **overrides}
+        d = size * 2
+        cx, cy = d // 2, d // 2
+
+        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
+        dx = px - cx
+        dy = py - cy
+        r = np.sqrt(dx * dx + dy * dy)
+        in_disc = np.clip(size - r + 0.5, 0.0, 1.0)
+        rr = np.clip(r / size, 0.0, 1.0)
+
+        base = np.array(base, dtype=np.float32)
+        # Brighten the body toward white — lifts dull colors without hue shift
+        # and never clips (channels already near 255 barely move).
+        body = base + (255.0 - base) * p['lift']
+
+        # Radial vignette only — darken toward the rim for depth.
+        shade = 1.0 - p['edge_darken'] * rr ** 3
+
+        rgba = np.empty((d, d, 4), dtype=np.uint8)
+        rgba[..., 0] = np.clip(body[0] * shade, 0, 255).astype(np.uint8)
+        rgba[..., 1] = np.clip(body[1] * shade, 0, 255).astype(np.uint8)
+        rgba[..., 2] = np.clip(body[2] * shade, 0, 255).astype(np.uint8)
+        rgba[..., 3] = (in_disc * 255.0).astype(np.uint8)
+
+        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
+        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
+
     # Tunable knobs for the clear-vinyl look. Each parameter is independent
     # so we can dial them one at a time.
     _CLEAR_PARAMS = dict(
@@ -1656,16 +2065,9 @@ class Display:
         body_a = in_disc * p['body_alpha']
 
         pc = np.array(p['platter_color'], dtype=np.float32)
-        # White contributions on top: streak + shimmer + rim
-        # 3. Streak (rotated)
-        ang = np.deg2rad(p['streak_angle_deg'])
-        u = (dx - size * p['streak_x_frac']) * np.cos(ang) - dy * np.sin(ang)
-        core_sigma = size * p['streak_core_width']
-        halo_sigma = size * p['streak_halo_width']
-        core = np.exp(-(u / core_sigma) ** 2) * p['streak_core_alpha']
-        halo = np.exp(-(u / halo_sigma) ** 2) * p['streak_halo_alpha']
-        vfade = np.clip((size - dy) / (2 * size), 0.0, 1.0) ** p['streak_top_fade']
-        streak = (core + halo) * vfade * in_disc
+        # White contributions on top: shimmer + rim. The specular streak now
+        # lives in the screen-fixed shine overlay (_build_shine_overlay) so the
+        # window reflection doesn't rotate with the disc.
 
         # 4. Concentric groove striations — visible across the whole disc
         # face (not just the music zone), modulating sinusoidally on r.
@@ -1678,7 +2080,7 @@ class Display:
         rim = np.clip(1.0 - np.abs(r - (size - 1.5)) / p['rim_width_px'],
                       0.0, 1.0) * p['rim_alpha']
 
-        white_a = np.clip(body_a + streak + striations + rim, 0.0, 1.0)
+        white_a = np.clip(body_a + striations + rim, 0.0, 1.0)
 
         # --- Rainbow refraction tints ---
         # Where light catches the grooves it doesn't read as pure white —
@@ -1774,52 +2176,73 @@ class Display:
         overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
         surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
 
+    @staticmethod
+    def _blit_disc_fill(surf, size, img):
+        """Blit a prerendered fractal disc so it fills the full record radius.
+
+        The cached patterns leave a transparent margin (the disc is masked at
+        ~0.95–0.97 of the frame, and it differs per pattern family). Auto-detect
+        each disc's actual opaque extent and scale so it reaches radius `size`,
+        then mask to a clean circle — so patterns match the full-size colored
+        and album-art discs regardless of their individual inset.
+        """
+        d = size * 2
+        bb = img.get_bounding_rect(min_alpha=1)
+        if bb.width > 0 and bb.height > 0:
+            iw, ih = img.get_size()
+            scale = d / max(bb.width, bb.height)
+            scaled = pygame.transform.smoothscale(
+                img, (max(1, round(iw * scale)), max(1, round(ih * scale))))
+            # Map the opaque bbox center onto the disc center.
+            ox = round(size - (bb.x + bb.width / 2.0) * scale)
+            oy = round(size - (bb.y + bb.height / 2.0) * scale)
+            surf.blit(scaled, (ox, oy))
+        else:
+            surf.blit(pygame.transform.smoothscale(img, (d, d)), (0, 0))
+
+        # Clean circular edge at the full radius (also crops any overscan).
+        mask = pygame.Surface((d, d), pygame.SRCALPHA)
+        pygame.draw.circle(mask, (255, 255, 255, 255), (size, size), size)
+        surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
     def _draw_mandelbrot_vinyl(self, surf, size, center, variant):
         """Draw a vinyl with a Mandelbrot set pattern. Uses pre-rendered cache if available."""
         name = variant[4]
         color = variant[5]
-
-        d = size * 2
         cache_path = os.path.join(CACHE_DIR, f'{name}-{color}.png')
 
         if os.path.isfile(cache_path):
-            cached = pygame.image.load(cache_path)
-            fractal = pygame.transform.smoothscale(cached, (d, d))
+            img = pygame.image.load(cache_path)
         else:
-            fractal = _render_mandelbrot_surface(variant, size)
+            img = _render_mandelbrot_surface(variant, size)
 
-        surf.blit(fractal, (0, 0))
+        self._blit_disc_fill(surf, size, img)
 
     def _draw_munafo_vinyl(self, surf, size, center, variant):
         """Draw a vinyl with a Munafo deep-zoom pattern. Uses the 1600x1600
         pre-rendered cache; falls back to downsampling the 9000x9000 gold
         archive on the fly if the cache is missing (slow first frame)."""
         config_name = variant[0]
-        d = size * 2
         cache_path = os.path.join(MUNAFO_CACHE_DIR, f'{config_name}.png')
 
         if os.path.isfile(cache_path):
-            cached = pygame.image.load(cache_path)
-            fractal = pygame.transform.smoothscale(cached, (d, d))
+            img = pygame.image.load(cache_path)
         else:
-            fractal = _render_munafo_surface(variant, size)
+            img = _render_munafo_surface(variant, size)
 
-        surf.blit(fractal, (0, 0))
+        self._blit_disc_fill(surf, size, img)
 
     def _draw_nebula_vinyl(self, surf, size, center, variant):
         """Draw a vinyl with a nebula pattern. Uses pre-rendered cache if available."""
         name = variant[2]
-
-        d = size * 2
         cache_path = os.path.join(NEBULA_CACHE_DIR, f'{name}.png')
 
         if os.path.isfile(cache_path):
-            cached = pygame.image.load(cache_path)
-            nebula = pygame.transform.smoothscale(cached, (d, d))
+            img = pygame.image.load(cache_path)
         else:
-            nebula = _render_nebula_surface(variant, size)
+            img = _render_nebula_surface(variant, size)
 
-        surf.blit(nebula, (0, 0))
+        self._blit_disc_fill(surf, size, img)
 
     def _render(self):
         status = self._status_cache or self.player.get_status()
@@ -1919,11 +2342,17 @@ class Display:
 
         # Body: supersampled texture, GPU downscales 2:1 during draw.
         body_key = (album_path, self.player.vinyl_style, self.player.vinyl_label,
-                    self.player.vinyl_brightness, record_size, 'body')
+                    self.player.vinyl_brightness, record_size, 'body',
+                    self.player.vinyl_label_text, self.player.vinyl_label_font,
+                    self.player.vinyl_label_artist_color, self.player.vinyl_label_album_color,
+                    self.player.vinyl_label_decor1, self.player.vinyl_label_decor1_color,
+                    self.player.vinyl_label_decor2, self.player.vinyl_label_decor2_color,
+                    status.get('artist'), status.get('album'))
         if body_key != self._record_texture_key:
             self._record_texture_key = body_key
             record_surf = self._build_record(record_size * RECORD_SUPERSAMPLE,
-                                             boundaries, album_dur, art_path, album_path)
+                                             boundaries, album_dur, art_path, album_path,
+                                             status.get('artist'), status.get('album'))
             self._record_texture = sdl2_video.Texture.from_surface(self.renderer, record_surf)
 
         # Grooves overlay: display-resolution texture, no GPU downscale,
@@ -1938,6 +2367,15 @@ class Display:
             self._grooves_texture.blend_mode = (
                 pygame.BLENDMODE_ADD if blend_mode == 'add' else pygame.BLENDMODE_BLEND)
 
+        # Specular shine: built per (style type, brightness, size) — independent
+        # of rotation and album, since it's the fixed room-light reflection.
+        shine_key = (style.get('type'), self.player.vinyl_brightness, record_size)
+        if shine_key != self._shine_texture_key:
+            self._shine_texture_key = shine_key
+            shine_surf = self._build_shine_overlay(record_size, style)
+            self._shine_texture = sdl2_video.Texture.from_surface(self.renderer, shine_surf)
+            self._shine_texture.blend_mode = pygame.BLENDMODE_BLEND
+
         rec_cx = meta_x + meta_width // 2
         rec_cy = y + record_size + int(self.height * 0.01)
         d = record_size * 2
@@ -1945,6 +2383,8 @@ class Display:
         self._record_rect = rec_dst
         self._record_texture.draw(dstrect=rec_dst, angle=self._record_angle)
         self._grooves_texture.draw(dstrect=rec_dst, angle=self._record_angle)
+        # Drawn WITHOUT angle — the reflection stays fixed as the disc spins.
+        self._shine_texture.draw(dstrect=rec_dst)
 
         # Needle — drawn on top, not rotating with the record
         if album_dur > 0:

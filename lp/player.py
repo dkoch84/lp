@@ -22,6 +22,16 @@ class PlayerBackend:
         self.vinyl_style = 'random'
         self.vinyl_label = 'art'
         self.vinyl_brightness = 100
+        self.vinyl_label_text = 'curved'   # none | curved | straight | blocky
+        self.vinyl_label_font = 'georgia'
+        # Per-element colors: 'auto' (= label accent) or '#rrggbb'
+        self.vinyl_label_artist_color = 'auto'
+        self.vinyl_label_album_color = 'auto'
+        # Two decoration slots (left, right): each a critter name / 'none' / 'random'
+        self.vinyl_label_decor1 = 'none'
+        self.vinyl_label_decor1_color = 'auto'
+        self.vinyl_label_decor2 = 'none'
+        self.vinyl_label_decor2_color = 'auto'
         self.album_path = None
         self.album = []
         self.current_song_index = 0
