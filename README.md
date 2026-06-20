@@ -1,6 +1,20 @@
+![DEATH](screenshots/README-DEATH.png)
+
 # lp
 
-![DEATH](screenshots/README-DEATH.png)
+## karmanjakah
+
+![Karmanjakah](screenshots/karmanjakah.jpg)
+
+What lands in this release:
+
+- **New cyan colorway** — the disc in the shot above.
+- **Glossy shine** — a fixed specular reflection that stays put as the record spins (the room light doesn't rotate with the disc).
+- **Album labels with real text** — artist and album rendered curved around the spindle, with a font picker, color controls, and two layers of decor rings.
+- **Unified vinyl picker** in the web UI — every style as a live thumbnail, sortable, with a collage editor for arranging them how you like.
+- **Music Browser** — Artist grid editor, favorites and sorting.
+
+---
 
 ### Stop changing tracks, stop switching playlists, stop making playlists. Good bands already make 'em, they call them albums. 
 
