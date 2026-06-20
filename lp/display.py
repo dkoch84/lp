@@ -1764,10 +1764,17 @@ class Display:
         streak_halo_width = 0.16,   # modest soft halo
         streak_halo_alpha = 0.10,
     )
+    # Per-style streak overrides for the shared shine overlay. Currently empty —
+    # clear vinyl owns its specular streak inside _draw_clear_vinyl so the light
+    # rotates with the disc and reads as "from within", and every other style is
+    # happy with _SHINE_PARAMS.
+    _SHINE_OVERRIDES_BY_TYPE = {}
     # Per-style gloss: vinyl is glossy across the board, but album-art /
-    # fractal faces get a lighter touch so detail isn't blown out.
+    # fractal faces get a lighter touch so detail isn't blown out. Clear is 0
+    # because its streak is drawn inside the rotating disc body (see
+    # _draw_clear_vinyl), not as a screen-fixed reflection.
     _GLOSS_BY_TYPE = {
-        'clear': 1.0, 'color': 0.95, 'black': 0.7,
+        'clear': 0.0, 'color': 0.95, 'black': 0.7,
         'mandelbrot': 0.7, 'nebula': 0.7, 'munafo': 0.7,
         'picture': 0.55, 'pattern': 0.65,
     }
@@ -1777,8 +1784,9 @@ class Display:
 
         Returns a surface to draw at angle=0 over the spinning record.
         """
-        p = self._SHINE_PARAMS
-        gloss = self._GLOSS_BY_TYPE.get((style or {}).get('type', 'black'), 0.7)
+        style_type = (style or {}).get('type', 'black')
+        p = {**self._SHINE_PARAMS, **self._SHINE_OVERRIDES_BY_TYPE.get(style_type, {})}
+        gloss = self._GLOSS_BY_TYPE.get(style_type, 0.7)
         d = size * 2
         cx = cy = size
 
@@ -2041,7 +2049,10 @@ class Display:
              turntable" rather than "ghost".
           2. Body — slight overall brightness on top of the platter.
           3. Specular streak — bright Gaussian CORE + wider HALO, slightly
-             tilted, fading top-to-bottom (light from above).
+             tilted, fading top-to-bottom (light from above). Clear vinyl
+             intentionally bakes its streak into the rotating disc body
+             (rather than the screen-fixed shine overlay used by every other
+             style) — this combined-pass look is what gives it its glow.
           4. Groove shimmer — subtle concentric brighter bands in the
              music zone where light catches groove ridges.
           5. Rim — bright edge highlight.
@@ -2065,9 +2076,16 @@ class Display:
         body_a = in_disc * p['body_alpha']
 
         pc = np.array(p['platter_color'], dtype=np.float32)
-        # White contributions on top: shimmer + rim. The specular streak now
-        # lives in the screen-fixed shine overlay (_build_shine_overlay) so the
-        # window reflection doesn't rotate with the disc.
+
+        # 3. Streak (rotated)
+        ang = np.deg2rad(p['streak_angle_deg'])
+        u = (dx - size * p['streak_x_frac']) * np.cos(ang) - dy * np.sin(ang)
+        core_sigma = size * p['streak_core_width']
+        halo_sigma = size * p['streak_halo_width']
+        core = np.exp(-(u / core_sigma) ** 2) * p['streak_core_alpha']
+        halo = np.exp(-(u / halo_sigma) ** 2) * p['streak_halo_alpha']
+        vfade = np.clip((size - dy) / (2 * size), 0.0, 1.0) ** p['streak_top_fade']
+        streak = (core + halo) * vfade * in_disc
 
         # 4. Concentric groove striations — visible across the whole disc
         # face (not just the music zone), modulating sinusoidally on r.
@@ -2080,7 +2098,7 @@ class Display:
         rim = np.clip(1.0 - np.abs(r - (size - 1.5)) / p['rim_width_px'],
                       0.0, 1.0) * p['rim_alpha']
 
-        white_a = np.clip(body_a + striations + rim, 0.0, 1.0)
+        white_a = np.clip(body_a + streak + striations + rim, 0.0, 1.0)
 
         # --- Rainbow refraction tints ---
         # Where light catches the grooves it doesn't read as pure white —
