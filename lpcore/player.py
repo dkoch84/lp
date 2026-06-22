@@ -1,18 +1,25 @@
 import vlc
 import os
 import glob
+import logging
 import threading
+import time
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
 
 AUDIO_EXTENSIONS = ('.mp3', '.flac')
+log = logging.getLogger("lp.player")
 
 
 class PlayerBackend:
     def __init__(self, audio_output='alsa'):
-        self._instance = vlc.Instance(f'--aout={audio_output}')
+        self._audio_output = audio_output
+        # --no-audio-time-stretch: lp never changes playback rate, and VLC's
+        # time-stretch otherwise swallows the first frames of the next track at a
+        # gapless boundary (audible as a clipped first word on direct ALSA).
+        self._instance = vlc.Instance(f'--aout={audio_output}', '--no-audio-time-stretch')
         # MediaListPlayer drives a MediaList for gapless playback: it preloads
         # the next item and switches without tearing down the audio output, so
         # albums with continuous audio across a track boundary (e.g. a reverb
@@ -38,6 +45,9 @@ class PlayerBackend:
         self.track_durations = []
         self.track_boundaries = []
         self.album_duration = 0.0
+        # monotonic time the current track's stream ended — paired with the next
+        # advance to measure the audible gap at the boundary (gapless diagnostics).
+        self._last_end_t = None
 
         self._attach_events()
 
@@ -46,6 +56,15 @@ class PlayerBackend:
         if em:
             em.event_attach(vlc.EventType.MediaListPlayerNextItemSet, self._on_next_item)
             em.event_attach(vlc.EventType.MediaListPlayerPlayed, self._on_list_end)
+        pem = self.player.event_manager()
+        if pem:
+            pem.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_track_end)
+
+    def _on_track_end(self, event):
+        self._last_end_t = time.monotonic()
+        with self._lock:
+            idx = self.current_song_index
+        log.info("track %d ended (stream)", idx + 1)
 
     def _on_next_item(self, event):
         # Fired once per item as the list player advances (including the first
@@ -66,12 +85,20 @@ class PlayerBackend:
                 return  # initial item — already reflected by play_start
             self.current_song_index = idx
             fire = 'track_change'
+            total = len(self.album)
+            title = os.path.basename(self.album[idx]) if idx < len(self.album) else '?'
         if fire:
+            # gap = wall-clock between the old track ending and the new one being
+            # set. ~0 (or negative, preloaded) = gapless; large positive = a gap.
+            gap = (time.monotonic() - self._last_end_t) * 1000.0 if self._last_end_t else None
+            log.info("advance -> track %d/%d (%s)%s", idx + 1, total, title,
+                     f"  boundary gap {gap:+.0f}ms" if gap is not None else "")
             self._fire(fire)
 
     def _on_list_end(self, event):
         with self._lock:
             self._playing = False
+        log.info("album end")
         self._fire('album_end')
 
     def on(self, event, callback):
@@ -122,7 +149,11 @@ class PlayerBackend:
             self._playing = True
             self._media_list = media_list
             self._mrls = mrls
+            self._last_end_t = None
 
+        log.info("play_album: %s — %d tracks, %.0fs, aout=%s",
+                 os.path.basename(album_path.rstrip('/')), len(files), cumulative,
+                 self._audio_output)
         self._list_player.set_media_list(media_list)
         self._list_player.play()
         self._fire('play_start')

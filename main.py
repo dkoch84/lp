@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -19,6 +20,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
+    # INFO by default (player logs boundary-gap timing etc.); LP_LOG_LEVEL=debug
+    # for more. Goes to stderr → the systemd journal on the deploy.
+    logging.basicConfig(
+        level=os.environ.get('LP_LOG_LEVEL', 'INFO').upper(),
+        format='%(asctime)s %(name)s %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S')
+    # quiet chatty third-party loggers (scrobbler HTTP) — keep the journal lp-focused
+    for noisy in ('pylast', 'httpx', 'httpcore'):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     parser = argparse.ArgumentParser(description='lp — album player')
     parser.add_argument('-c', '--config', default='config.yml', help='Path to config file')
     parser.add_argument('--no-display', action='store_true', help='Run without pygame display')
