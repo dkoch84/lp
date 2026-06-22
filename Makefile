@@ -1,5 +1,5 @@
 PY := .venv/bin/python
-SRC := lpcore lp main.py dev_spin.py gen_release_icon.py tests
+SRC := lpcore lp lpdeck main.py dev_spin.py gen_release_icon.py tests
 
 .PHONY: check lint test fix run
 
