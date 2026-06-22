@@ -1,190 +1,107 @@
-# lp Deployment Guide
+# lp Deployment
 
-## ODROID C4 Setup
+Two apps, one shared core (`lpcore`):
 
-### 1. Initial System Setup
+- **lp** — the album kiosk: a spinning-vinyl display window + a web UI you control
+  from any browser/phone on the LAN. Runs on a Linux box wired to a screen and
+  speakers (e.g. an ODROID/Pi), or on any desktop.
+- **lp-deck** — the desktop player (PySide6): full library / playlists / tracks,
+  with the vinyl as the Now-Playing view.
 
-Flash Armbian to eMMC using [Armbian for ODROID-C4](https://www.armbian.com/odroid-c4/):
-- Download latest Armbian stable release
-- Use Balena Etcher or similar to flash to eMMC
-- Enable SSH during first boot (follow Armbian prompts)
-- Configure network and hostname
+Paths below use `~/lp` for the checkout and `<user>` for your login — adjust to
+taste. Commands are Debian/Ubuntu (`apt`); other distros use the equivalents.
 
-SSH into your ODROID:
-```bash
-ssh root@odroid-c4.local
-# or
-ssh root@192.168.1.XXX
-```
-
-### 2. Run Setup Script
+## 1. System packages
 
 ```bash
-curl -O https://raw.githubusercontent.com/yourusername/lp/master/deploy/rpi-setup.sh
-chmod +x rpi-setup.sh
-./rpi-setup.sh
+sudo apt update
+sudo apt install -y python3 python3-venv git \
+    vlc pipewire pipewire-pulse wireplumber
 ```
 
-This installs all dependencies and creates the app structure.
+- `vlc` provides **libVLC + codecs** that `python-vlc` binds to (audio playback).
+- `pipewire` + `pipewire-pulse` is the audio server — required for **gapless**
+  (see step 4).
 
-### 3. Configure NFS Mount
+## 2. Clone + Python environment
 
-Edit `/etc/fstab` to add your NFS share:
 ```bash
-sudo nano /etc/fstab
+git clone <repo-url> ~/lp && cd ~/lp
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
 ```
 
-Add a line like:
-```
-nas.local:/export/music    /mnt/music    nfs    defaults,_netdev,nofail    0    0
-```
+## 3. Config
 
-Or run the helper script:
 ```bash
-deploy/setup-nfs.sh nas.local /export/music
+cp config.example.yml config.yml      # lp reads ./config.yml, or pass -c <path>
 ```
 
-Test the mount:
+Edit it: set `music_library_path` (a local folder or an NFS/SMB mount), the
+display size, and **`audio_output: pulse`** (for gapless — step 4). The control
+port defaults to a remembered random one; set `api.port` to pin it (e.g. behind
+a proxy).
+
+## 4. Audio — pipewire (for gapless)
+
+On raw ALSA, VLC re-primes the output device at every track boundary and clips
+the first fraction of the next track (audible as a cut-off first word on
+continuous albums). Routing through pipewire keeps **one persistent stream**
+across the whole album, which fixes it. (lp also passes `--no-audio-time-stretch`
+to VLC, which helps on ALSA but isn't a full fix on its own.)
+
+Start the user audio services and point lp at them:
+
 ```bash
-sudo mount -a
-ls /mnt/music
+systemctl --user enable --now pipewire pipewire-pulse wireplumber
+# set  audio_output: pulse  in config.yml
 ```
 
-### 4. Configure the Application
+Volume: `wpctl set-volume @DEFAULT_AUDIO_SINK@ 100%`. Confirm lp connected — the
+log line `play_album: … aout=pulse` (not `alsa`).
 
-Copy example config and edit:
+**Headless kiosk note:** if lp runs as a *system* service (no graphical login),
+the user pipewire socket won't exist at boot and the service can't see it. Fix:
+
 ```bash
-sudo cp config.example.yml /etc/lp/config.yml
-sudo nano /etc/lp/config.yml
+sudo loginctl enable-linger <user>     # user services start at boot
+# add to the lp unit:  Environment=XDG_RUNTIME_DIR=/run/user/$(id -u <user>)
 ```
 
-Set the music library path to your NFS mount:
-```yaml
-music_library_path: /mnt/music
-display:
-  fullscreen: true
-  width: 1920
-  height: 1080
-lastfm:
-  api_key: ""
-  api_secret: ""
+## 5. Run the kiosk (lp)
+
+Foreground (opens the vinyl window, prints the control URL, opens a browser at a
+desktop):
+
+```bash
+venv/bin/python main.py
 ```
 
-Adjust display resolution to your connected display.
-
-### 5. Set Up Systemd Service
+Autostart as a service — edit `deploy/lp.service` (`User`, `WorkingDirectory`,
+the `ExecStart` config path), then:
 
 ```bash
 sudo cp deploy/lp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable lp
-sudo systemctl start lp
+sudo systemctl enable --now lp
+journalctl -u lp -f
 ```
 
-Check the service:
-```bash
-sudo systemctl status lp
-sudo journalctl -u lp -f
-```
+The web UI is on the config'd port; reach it from any device on the LAN. To
+expose it beyond the LAN, put a reverse proxy (e.g. nginx) in front, forwarding
+to `http://<host>:<port>`.
 
-The web UI should be available at `http://odroid-c4.local:8000` (or your ODROID's IP).
+## 6. Run the desktop (lp-deck)
 
----
-
-## k3d Reverse Proxy Setup
-
-### 1. Prepare the Ingress Manifest
-
-Edit `deploy/k3d-ingress.yaml`:
-- Replace `RPI_IP` with your RPi's IP address (e.g., `192.168.1.100`)
-- Replace `music.example.com` with your actual domain
-- Ensure the TLS secret name matches your existing setup
-
-### 2. Apply to k3d
+Needs Qt on top of the same checkout:
 
 ```bash
-kubectl apply -f deploy/k3d-ingress.yaml
+venv/bin/pip install PySide6
+venv/bin/python -m lpdeck
 ```
 
-### 3. Verify the Proxy
-
-Check that the proxy deployment is running:
-```bash
-kubectl get deployments
-kubectl get pods
-kubectl logs -f deployment/lp-proxy
-```
-
-Check the Ingress:
-```bash
-kubectl get ingress
-```
-
-### 4. Access Through Your Cluster
-
-Your lp web UI should now be accessible at:
-```
-https://music.example.com
-```
-
-Through your k3d cluster's existing TLS termination and DNS setup.
-
----
-
-## Troubleshooting
-
-### ODROID: Service won't start
-```bash
-sudo journalctl -u lp -n 50
-```
-
-Common issues:
-- Config file permissions: `sudo chown root:root /etc/lp/config.yml`
-- NFS not mounted: `mount | grep /mnt/music`
-- Display not found: Check if DISPLAY variable is set correctly (may need `:0` or `:1`)
-- Graphics permissions: Ensure the X server is running and accessible to root
-
-### k3d: Proxy shows 502 Bad Gateway
-- Verify ODROID IP is correct in ConfigMap
-- Check ODROID API is running: `curl http://odroid-c4.local:8000`
-- Check network connectivity from k3d node to ODROID
-
-### NFS mount issues
-```bash
-# Force remount
-sudo umount /mnt/music
-sudo mount -a
-
-# Check NFS connectivity
-showmount -e nas.local
-```
-
----
-
-## Maintenance
-
-### Update lp on ODROID
+## Update
 
 ```bash
-cd /opt/lp
-sudo git pull
-source venv/bin/activate
-pip install -r requirements.txt
-sudo systemctl restart lp
-```
-
-### View Logs
-
-```bash
-# Systemd journal
-sudo journalctl -u lp -f
-
-# Last 50 lines
-sudo journalctl -u lp -n 50
-```
-
-### Restart Service
-
-```bash
-sudo systemctl restart lp
+cd ~/lp && git pull && venv/bin/pip install -r requirements.txt
+sudo systemctl restart lp        # if running as a service
 ```

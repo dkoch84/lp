@@ -17,3 +17,4 @@ lpcore/cache/
 .lp_state.json
 .lp_launch.json
 image.png
+.ruff_cache/
