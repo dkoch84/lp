@@ -38,7 +38,7 @@ from lp.display import (Display, OUTER_GROOVE, INNER_GROOVE, RECORD_SUPERSAMPLE,
                         VINYL_COLORS, MANDELBROT_VARIANTS, NEBULA_VARIANTS,
                         MUNAFO_VARIANTS)
 from lp.api import create_app
-from lp.library import Library
+from lpcore.library import Library
 
 WIN_W, WIN_H = 1000, 800
 WEB_PORT = 8000

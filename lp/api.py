@@ -195,7 +195,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
 
     @app.get("/api/version")
     def version():
-        from lp.version import get_version
+        from lpcore.version import get_version
         return get_version()
 
     # --- Settings ---

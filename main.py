@@ -7,10 +7,10 @@ import webbrowser
 import yaml
 import uvicorn
 
-from lp.player import PlayerBackend
-from lp.library import Library
+from lpcore.player import PlayerBackend
+from lpcore.library import Library
+from lpcore.scrobbler import Scrobbler
 from lp.api import create_app
-from lp.scrobbler import Scrobbler
 from lp.state import UserState
 from lp.launch import resolve_port, lan_ip
 
