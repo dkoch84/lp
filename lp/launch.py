@@ -48,15 +48,18 @@ def port_is_free(port, host='0.0.0.0'):
             return False
 
 
-def resolve_port(assigned, store_path, host='0.0.0.0', save=True):
+def resolve_port(assigned, store_path, host='0.0.0.0', save=True, config_port=None):
     """Resolve the control-server port.
 
-    Precedence: explicit assigned port > saved launch config > random free port.
-    ``assigned`` may be an int/str port, ``'random'`` to force a fresh pick, or
-    None/``'auto'`` to use the saved value (falling back to random). The chosen
-    port is persisted unless ``save`` is False.
+    Precedence: explicit ``--port`` > config ``api.port`` > saved launch config >
+    random free port. ``assigned`` may be an int/str port, ``'random'`` to force a
+    fresh pick, or None/``'auto'`` to defer to config/saved/random. A port set in
+    config.yml is authoritative (e.g. the deploy behind nginx must stay on its
+    fixed port), so it's used as-is. Auto-picked/assigned ports are persisted
+    (unless ``save`` is False); a config port is not (it lives in config).
 
-    Returns ``(port, source)`` with source ``'assigned' | 'saved' | 'random'``.
+    Returns ``(port, source)`` with source
+    ``'assigned' | 'config' | 'saved' | 'random'``.
     """
     cfg = _load(store_path)
     norm = assigned.strip().lower() if isinstance(assigned, str) else assigned
@@ -68,13 +71,19 @@ def resolve_port(assigned, store_path, host='0.0.0.0', save=True):
         if not port_is_free(port, host):
             raise SystemExit(f"Port {port} is already in use — pick another with --port.")
         source = 'assigned'
+    elif config_port:
+        # A configured port is authoritative — bind it as-is (and let it fail
+        # loudly if taken) rather than silently drifting to a random port that
+        # whatever proxies to it can no longer reach.
+        port, source = int(config_port), 'config'
     elif cfg.get('port') and port_is_free(int(cfg['port']), host):
         port, source = int(cfg['port']), 'saved'
     else:
         # No usable saved port (unset, or taken by another instance) — pick fresh.
         port, source = find_free_port(), 'random'
 
-    if save and cfg.get('port') != port:
+    # Only remember auto-picked/assigned ports; a config port stays in config.
+    if save and source in ('random', 'assigned') and cfg.get('port') != port:
         cfg['port'] = port
         _save(store_path, cfg)
 

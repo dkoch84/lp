@@ -42,7 +42,8 @@ def main():
     host = api_config.get('host', '0.0.0.0')
 
     launch_store = os.path.join(HERE, '.lp_launch.json')
-    port, source = resolve_port(args.port, launch_store, host=host, save=not args.no_save)
+    port, source = resolve_port(args.port, launch_store, host=host,
+                                save=not args.no_save, config_port=api_config.get('port'))
 
     static_dir = os.path.join(HERE, 'static')
 
@@ -52,8 +53,8 @@ def main():
     print(f"\n  lp control: {url_local}", flush=True)
     if url_lan:
         print(f"  on your network (phone): {url_lan}", flush=True)
-    if source == 'saved':
-        port_note = 'saved'                       # reused from a previous launch
+    if source in ('saved', 'config'):
+        port_note = source            # reused from a previous launch / set in config.yml
     else:
         port_note = f"{source}, {'not saved' if args.no_save else 'saved'}"
     print(f"  port {port} ({port_note})\n", flush=True)
