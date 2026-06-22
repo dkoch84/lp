@@ -14,4 +14,5 @@ lp/cache/
 !lp/cache/munafo/
 !lp/cache/munafo/*.png
 .lp_state.json
+.lp_launch.json
 image.png
