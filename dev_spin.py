@@ -2,8 +2,9 @@
 """Dev-only vinyl inspector.
 
 A spinning record + tonearm on a black background, with NO playback and NO
-VLC. Reuses the real rendering path from lp.display (_build_record,
-_build_grooves_overlay, needle geometry) so what you see matches the app.
+VLC. Reuses the real rendering path — lpcore.vinyl.VinylRenderer (build_record,
+build_grooves_overlay, build_shine_overlay) + lp.display needle geometry — so
+what you see matches the app.
 
 Cycle through every vinyl style to inspect each render, OR drive it live from
 the real web UI: this also serves the lp web UI on http://localhost:8000 bound
@@ -190,7 +191,7 @@ def main():
 
         cur_style = settings.style
         ap = album_path()
-        style = disp._get_vinyl_style(ap) or {'type': 'black'}
+        style = disp.vinyl.get_vinyl_style(ap) or {'type': 'black'}
 
         # Rebuild textures only when the inputs change. Sample metadata so the
         # label text renders in the inspector.
@@ -204,7 +205,7 @@ def main():
         if bkey != body_key:
             body_key = bkey
             try:
-                surf = disp._build_record(record_size * RECORD_SUPERSAMPLE,
+                surf = disp.vinyl.build_record(record_size * RECORD_SUPERSAMPLE,
                                           boundaries, album_dur, art_path, ap,
                                           SAMPLE_ARTIST, SAMPLE_ALBUM)
                 body_tex = sdl2_video.Texture.from_surface(renderer, surf)
@@ -212,7 +213,7 @@ def main():
                 print(f'body build failed for {cur_style}: {ex}')
                 body_tex = None
             try:
-                gsurf, blend = disp._build_grooves_overlay(record_size, style,
+                gsurf, blend = disp.vinyl.build_grooves_overlay(record_size, style,
                                                            boundaries, album_dur)
                 grooves_tex = sdl2_video.Texture.from_surface(renderer, gsurf)
                 grooves_tex.blend_mode = (pygame.BLENDMODE_ADD
@@ -226,7 +227,7 @@ def main():
         if skey != shine_key:
             shine_key = skey
             try:
-                ssurf = disp._build_shine_overlay(record_size, style)
+                ssurf = disp.vinyl.build_shine_overlay(record_size, style)
                 shine_tex = sdl2_video.Texture.from_surface(renderer, ssurf)
                 shine_tex.blend_mode = pygame.BLENDMODE_BLEND
             except Exception as ex:

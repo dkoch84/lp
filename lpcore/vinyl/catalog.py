@@ -262,3 +262,6 @@ NEBULA_GROOVE_COLORS = {
     'molten':         ((0, 0, 0, 30), (0, 0, 0, 56)),
     'lava-lamp':      ((0, 0, 0, 30), (0, 0, 0, 56)),
 }
+
+# Background / spindle-hole colour (also lp.display window bg).
+DARK_BG = (17, 17, 17)

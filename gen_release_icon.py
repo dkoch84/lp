@@ -72,13 +72,13 @@ def main():
     boundaries, album_dur = real_boundaries()
     cover = os.path.join(ALBUM_DIR, 'cover.jpg')
     art = cover if os.path.isfile(cover) else None
-    style = disp._get_vinyl_style(ALBUM_DIR)
+    style = disp.vinyl.get_vinyl_style(ALBUM_DIR)
 
     # Body (supersampled), grooves, shine — exactly as the live display builds them.
-    body = disp._build_record(RENDER_R * RECORD_SUPERSAMPLE, boundaries, album_dur,
+    body = disp.vinyl.build_record(RENDER_R * RECORD_SUPERSAMPLE, boundaries, album_dur,
                               art, ALBUM_DIR, ARTIST, ALBUM)
-    grooves, blend = disp._build_grooves_overlay(RENDER_R, style, boundaries, album_dur)
-    shine = disp._build_shine_overlay(RENDER_R, style)
+    grooves, blend = disp.vinyl.build_grooves_overlay(RENDER_R, style, boundaries, album_dur)
+    shine = disp.vinyl.build_shine_overlay(RENDER_R, style)
 
     d = RENDER_R * 2
     base = pygame.transform.smoothscale(body, (d, d))
