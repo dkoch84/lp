@@ -47,15 +47,9 @@ def _resolve_color(val, fallback):
 
 
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'mandelbrot')
-NEBULA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'nebula')
-JULIA_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'julia')
-MUNAFO_CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache', 'munafo')
-# The 9000×9000 gold archives live in the sibling `bongsweat` repo. This
-# path is only used by prerender_all() to regenerate the vinyl cache; at
-# runtime, lp reads from MUNAFO_CACHE_DIR (committed in this repo).
-MUNAFO_SOURCE_DIR = os.path.join(os.path.dirname(__file__), '..', '..',
-                                  'bongsweat', 'configs')
+# Vinyl cache locations now live in lpcore (re-exported here for api.py et al.).
+from lpcore.vinyl.cache import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,
+                                MUNAFO_CACHE_DIR, MUNAFO_SOURCE_DIR)
 
 
 

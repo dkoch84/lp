@@ -9,10 +9,11 @@ config.yml
 dev_out/
 test_records/
 lp/cache/
-# Keep the munafo vinyl-size cache — it's small (~14 MB) and required at
-# runtime. The 9000×9000 gold archives live in the bongsweat repo.
-!lp/cache/munafo/
-!lp/cache/munafo/*.png
+# Pre-rendered vinyl caches (mandelbrot/nebula/julia/munafo). Runtime-generated;
+# the munafo snapshots are regenerated from the bongsweat repo. (Note: these are
+# currently untracked — see the prior !lp/cache/munafo negation which never took,
+# since git can't re-include inside an ignored parent.)
+lpcore/cache/
 .lp_state.json
 .lp_launch.json
 image.png
