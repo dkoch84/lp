@@ -35,12 +35,13 @@ import uvicorn
 import yaml
 from pygame._sdl2 import video as sdl2_video
 
-from lp.display import (Display, OUTER_GROOVE, INNER_GROOVE, RECORD_SUPERSAMPLE,
-                        VINYL_COLORS, MANDELBROT_VARIANTS, NEBULA_VARIANTS,
-                        MUNAFO_VARIANTS)
+from lp.display import Display
 from lp.api import create_app
 from lpcore.library import Library
 from lpcore.vinyl.settings import VinylSettings
+from lpcore.vinyl.catalog import (OUTER_GROOVE, INNER_GROOVE, RECORD_SUPERSAMPLE,
+                                  VINYL_COLORS, MANDELBROT_VARIANTS, MUNAFO_VARIANTS)
+from lpcore.vinyl.fractals import NEBULA_VARIANTS
 
 WIN_W, WIN_H = 1000, 800
 WEB_PORT = 8000
@@ -144,7 +145,7 @@ def main():
     record_size = 300
     angle = 0.0
     body_tex = body_key = None
-    grooves_tex = grooves_key = None
+    grooves_tex = None
     shine_tex = shine_key = None
 
     def album_path():

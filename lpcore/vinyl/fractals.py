@@ -5,7 +5,6 @@ nebula, julia and munafo vinyl/label surfaces (caching the results as PNGs), and
 _pick_vinyl_style maps an album + override to a concrete style. Shared by lp's
 display and lp-deck via lpcore.
 """
-import math
 import os
 import random
 

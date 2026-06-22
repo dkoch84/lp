@@ -20,8 +20,9 @@ os.environ.setdefault('SDL_AUDIODRIVER', 'dummy')
 import pygame
 from mutagen.flac import FLAC
 
-from lp.display import Display, RECORD_SUPERSAMPLE
+from lp.display import Display
 from lpcore.vinyl.settings import VinylSettings
+from lpcore.vinyl.catalog import RECORD_SUPERSAMPLE
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ALBUM_DIR = '/mnt/share/media/Music/Karmanjakah/2026 - Diamond morning'

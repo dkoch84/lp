@@ -221,7 +221,6 @@ class PlayerBackend:
     def get_status(self):
         with self._lock:
             playing = self._playing
-            album_path = self.album_path
             index = self.current_song_index
             total_tracks = len(self.album)
             track_file = self.album[index] if self.album and index < len(self.album) else None

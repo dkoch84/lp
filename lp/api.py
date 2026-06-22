@@ -207,9 +207,10 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.post("/api/settings/vinyl")
     def set_vinyl_style(req: VinylStyleRequest):
-        from lp.display import (MANDELBROT_VARIANTS, MANDELBROT_COLORS,
-                                MANDELBROT_ZOOMS, NEBULA_VARIANTS,
-                                MUNAFO_VARIANTS, VINYL_COLORS)
+        from lpcore.vinyl.catalog import (MANDELBROT_VARIANTS, MANDELBROT_COLORS,
+                                          MANDELBROT_ZOOMS, MUNAFO_VARIANTS,
+                                          VINYL_COLORS)
+        from lpcore.vinyl.fractals import NEBULA_VARIANTS
         mandelbrot_combo = ['mandelbrot-' + v[4] + '-' + v[5] for v in MANDELBROT_VARIANTS]
         mandelbrot_colors = ['mandelbrot-' + c for c in MANDELBROT_COLORS]
         mandelbrot_zooms = ['mandelbrot-' + z[4] for z in MANDELBROT_ZOOMS]
@@ -235,9 +236,9 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.get("/api/settings/vinyl/options")
     def get_vinyl_options():
-        from lp.display import (MANDELBROT_VARIANTS, MANDELBROT_COLORS,
-                                MANDELBROT_ZOOMS, NEBULA_VARIANTS,
-                                MUNAFO_VARIANTS, VINYL_COLORS)
+        from lpcore.vinyl.catalog import (MANDELBROT_VARIANTS, MUNAFO_VARIANTS,
+                                          VINYL_COLORS)
+        from lpcore.vinyl.fractals import NEBULA_VARIANTS
         mandelbrot_combo = [{'id': 'mandelbrot-' + v[4] + '-' + v[5],
                              'label': v[4].replace('-', ' ').title() + ' ' + v[5].title(),
                              'category': 'mandelbrot'}
@@ -289,8 +290,8 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.get("/api/vinyl/preview/{style:path}")
     def vinyl_preview(style: str):
-        from lp.display import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,
-                                MUNAFO_CACHE_DIR)
+        from lpcore.vinyl.cache import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,
+                                        MUNAFO_CACHE_DIR)
         # Vinyl previews are content-addressable by style id and effectively
         # never change once cached, so let the browser hold onto them for a
         # year. New variants get new ids; cached previews are stable.
@@ -331,8 +332,9 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.post("/api/settings/label")
     def set_label(req: LabelRequest):
-        from lp.display import (LABEL_COLORS, VINYL_COLORS, MANDELBROT_VARIANTS,
-                                NEBULA_VARIANTS, MUNAFO_VARIANTS)
+        from lpcore.vinyl.catalog import (LABEL_COLORS, VINYL_COLORS,
+                                          MANDELBROT_VARIANTS, MUNAFO_VARIANTS)
+        from lpcore.vinyl.fractals import NEBULA_VARIANTS
         valid = (['art']
                  + ['color-' + c for c in VINYL_COLORS]
                  + ['label-' + c for c in LABEL_COLORS]  # legacy, still accepted
@@ -346,8 +348,9 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.get("/api/settings/label/options")
     def get_label_options():
-        from lp.display import (LABEL_COLORS, MANDELBROT_VARIANTS,
-                                NEBULA_VARIANTS, MUNAFO_VARIANTS)
+        from lpcore.vinyl.catalog import (LABEL_COLORS, MANDELBROT_VARIANTS,
+                                          MUNAFO_VARIANTS)
+        from lpcore.vinyl.fractals import NEBULA_VARIANTS
         options = [{'id': 'art', 'label': 'Album Art', 'category': 'basic'}]
         for name in LABEL_COLORS:
             options.append({'id': 'label-' + name, 'label': name.title(),

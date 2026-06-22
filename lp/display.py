@@ -1,20 +1,16 @@
 import io
 import math
 import os
-import random
 import threading
 import time
-import numpy as np
 import pygame
 import pygame.gfxdraw
 from pygame._sdl2 import video as sdl2_video
 
 from lpcore.vinyl.settings import VinylSettings
-from lpcore.vinyl.fractals import NEBULA_VARIANTS
 from lpcore.vinyl.render import VinylRenderer
-from lpcore.vinyl.catalog import DARK_BG
 from lpcore.vinyl.catalog import (
-    DECOR_EMOJI, BLACK_GROOVE_COLORS, CLEAR_GROOVE_COLORS, INNER_GROOVE, JULIA_VARIANTS, LABEL_COLORS, LABEL_RADIUS, MANDELBROT_COLORS, MANDELBROT_GROOVE_COLORS, MANDELBROT_VARIANTS, MANDELBROT_ZOOMS, MUNAFO_GROOVE_COLORS, MUNAFO_VARIANTS, NEBULA_GROOVE_COLORS, OUTER_GROOVE, PICTURE_GROOVE_COLORS, PRERENDER_SIZE, RECORD_SUPERSAMPLE, STYLE_DISTRIBUTION, VINYL_BLACK, VINYL_COLORS, VINYL_GROOVE_COLORS, VINYL_LABEL, VINYL_LABEL_DARK)
+    DARK_BG, INNER_GROOVE, OUTER_GROOVE, RECORD_SUPERSAMPLE)
 
 
 PANEL_BG = (22, 22, 22)
@@ -42,8 +38,6 @@ NEEDLE_COLOR = (200, 200, 200)
 
 
 # Vinyl cache locations now live in lpcore (re-exported here for api.py et al.).
-from lpcore.vinyl.cache import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,
-                                MUNAFO_CACHE_DIR, MUNAFO_SOURCE_DIR)
 
 
 
@@ -169,7 +163,7 @@ class Display:
     def request_screenshot(self, timeout=8.0):
         """Capture the current frame as PNG bytes. Thread-safe; intended to be
         called from the API thread. Returns bytes on success, None on timeout."""
-        print(f'[share] request_screenshot called', flush=True)
+        print('[share] request_screenshot called', flush=True)
         with self._screenshot_lock:
             self._screenshot_data = None
         self._dirty = True  # force a re-render so we capture the latest state
@@ -182,14 +176,14 @@ class Display:
                     print(f'[share] request_screenshot got {n} bytes', flush=True)
                     return self._screenshot_data or None
             time.sleep(0.05)
-        print(f'[share] request_screenshot TIMED OUT', flush=True)
+        print('[share] request_screenshot TIMED OUT', flush=True)
         return None
 
     def _capture_screenshot_if_requested(self):
         """Called from the pygame loop, right after present()."""
         if not self._screenshot_event.is_set():
             return
-        print(f'[share] _capture_screenshot_if_requested firing', flush=True)
+        print('[share] _capture_screenshot_if_requested firing', flush=True)
         self._screenshot_event.clear()
         try:
             surf = self.renderer.to_surface()
@@ -214,16 +208,16 @@ class Display:
                     print(f'[share] subsurface ok, size={sub.get_size()}', flush=True)
                     if hasattr(pygame.transform, 'gaussian_blur'):
                         sub = pygame.transform.gaussian_blur(sub, 1)
-                        print(f'[share] gaussian_blur ok', flush=True)
+                        print('[share] gaussian_blur ok', flush=True)
                     else:
                         sw, sh = sub.get_size()
                         small = pygame.transform.smoothscale(sub, (sw * 3 // 4, sh * 3 // 4))
                         sub = pygame.transform.smoothscale(small, (sw, sh))
-                        print(f'[share] smoothscale-blur ok', flush=True)
+                        print('[share] smoothscale-blur ok', flush=True)
                     surf.blit(sub, rect.topleft)
-                    print(f'[share] blit back ok', flush=True)
+                    print('[share] blit back ok', flush=True)
             else:
-                print(f'[share] no record_rect set', flush=True)
+                print('[share] no record_rect set', flush=True)
             # Downscale (or scale-to-fit) 1920×1080. PNG encoding stays small
             # enough and the saved image matches typical TV/display output.
             target_w, target_h = 1920, 1080
