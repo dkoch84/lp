@@ -21,8 +21,8 @@ def valid_color(c):
 
 @dataclass
 class VinylSettings:
-    style: str = 'random'
-    label: str = 'art'
+    style: str = 'black'              # product default: black vinyl,
+    label: str = 'label-white'        # white label
     brightness: int = 100
     label_text: str = 'curved'        # none | curved | straight | blocky
     label_font: str = 'georgia'
