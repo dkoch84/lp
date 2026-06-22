@@ -29,6 +29,7 @@ def _load_config():
 def main():
     from PySide6.QtWidgets import QApplication
     from .app import MainWindow
+    from . import theme
 
     config = _load_config()
     con = db.connect(os.path.join(DATA_DIR, "library.db"))
@@ -38,6 +39,7 @@ def main():
     player = QueuePlayer(backend, scrobbler)
 
     app = QApplication(sys.argv)
+    theme.apply(app)            # minimalist polish over the inherited qt6ct/Plasma theme
     win = MainWindow(con, player)
     win.show()
     try:

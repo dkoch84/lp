@@ -31,10 +31,13 @@ class MainWindow(QMainWindow):
 
         # --- body: nav | content ---
         body = QHBoxLayout()
+        body.setContentsMargins(12, 12, 12, 6)
+        body.setSpacing(12)
         outer.addLayout(body, 1)
 
         # left nav + search (req #4 search, #5 filters/sorts live in each view)
         left = QVBoxLayout()
+        left.setSpacing(8)
         self.search = QLineEdit(placeholderText="Search artists, albums, songs…")
         self.nav = QListWidget()
         self.nav.addItems(NAV)
@@ -63,26 +66,37 @@ class MainWindow(QMainWindow):
 
     def _now_playing_bar(self):
         bar = QWidget()
-        bar.setFixedHeight(120)
+        bar.setObjectName("nowPlaying")
+        bar.setFixedHeight(108)
         lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(14)
 
         self.vinyl = VinylWidget(VinylSettings())
-        self.vinyl.setFixedSize(100, 100)
+        self.vinyl.setFixedSize(88, 88)
         lay.addWidget(self.vinyl)
 
         info = QVBoxLayout()
+        info.setSpacing(2)
         self.np_title = QLabel("—")
+        self.np_title.setObjectName("npTitle")
         self.np_sub = QLabel("")
+        self.np_sub.setObjectName("npSub")
         info.addStretch(1)
         info.addWidget(self.np_title)
         info.addWidget(self.np_sub)
         info.addStretch(1)
         lay.addLayout(info, 1)
 
-        # transport (req #3 queue control)
-        for label, slot in (("⏮", self._prev), ("⏯", self._toggle), ("⏭", self._next)):
+        # transport (req #3) — the middle is the accent play button
+        for label, slot, name in (("⏮", self._prev, None),
+                                   ("⏵", self._toggle, "playButton"),
+                                   ("⏭", self._next, None)):
             b = QPushButton(label)
-            b.setFixedWidth(44)
+            if name:
+                b.setObjectName(name)
+            else:
+                b.setFixedWidth(40)
             b.clicked.connect(slot)
             lay.addWidget(b)
 
