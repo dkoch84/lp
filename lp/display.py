@@ -1173,6 +1173,18 @@ class Display:
         try:
             surf = self.renderer.to_surface()
             print(f'[share] to_surface size={surf.get_size()}', flush=True)
+            # Normalize to the logical render resolution: when the window isn't
+            # 16:9 the output is letterboxed, so crop to the centered render area
+            # (matching SDL's logical-size scaling) before using logical-space
+            # coords like _record_rect.
+            ow, oh = surf.get_size()
+            if (ow, oh) != (self.width, self.height):
+                s = min(ow / self.width, oh / self.height)
+                vw, vh = int(self.width * s), int(self.height * s)
+                vx, vy = (ow - vw) // 2, (oh - vh) // 2
+                surf = surf.subsurface(pygame.Rect(vx, vy, vw, vh)).copy()
+                surf = pygame.transform.smoothscale(surf, (self.width, self.height))
+                print(f'[share] de-letterboxed to {surf.get_size()}', flush=True)
             if self._record_rect is not None:
                 rect = pygame.Rect(self._record_rect).clip(surf.get_rect())
                 print(f'[share] record_rect={self._record_rect}, clipped={rect}', flush=True)
@@ -1218,19 +1230,30 @@ class Display:
         pygame.init()
         pygame.mixer.quit()  # Release audio device for VLC
 
+        # self.width/height are the FIXED internal render resolution; all layout
+        # math lives in that space. The window may be any size or fullscreen — the
+        # renderer's logical size scales the render to fit, letterboxing to keep
+        # aspect, so the look is identical at every window size.
+        self.window = sdl2_video.Window('lp', size=(self.width, self.height))
+        self.window.resizable = True
         if self.fullscreen:
-            self.window = sdl2_video.Window('lp', size=(self.width, self.height),
-                                            fullscreen_desktop=True)
-            self.width, self.height = self.window.size
-        else:
-            self.window = sdl2_video.Window('lp', size=(self.width, self.height))
+            self.window.set_fullscreen(desktop=True)
 
         try:
             self.renderer = sdl2_video.Renderer(self.window, accelerated=1, vsync=True)
-            print(f'display: GPU renderer at {self.width}x{self.height} (SS={RECORD_SUPERSAMPLE})', flush=True)
+            print(f'display: GPU renderer, render res {self.width}x{self.height} (SS={RECORD_SUPERSAMPLE})', flush=True)
         except pygame.error as e:
             print(f'WARN: GPU renderer unavailable ({e}); falling back to software', flush=True)
             self.renderer = sdl2_video.Renderer(self.window, accelerated=0)
+
+        self.renderer.logical_size = (self.width, self.height)
+
+        # Window events that change the output size (or expose a stale frame) —
+        # re-assert logical size and force a redraw, since we only present on dirty.
+        resize_events = {getattr(pygame, n) for n in
+                         ('WINDOWRESIZED', 'WINDOWSIZECHANGED', 'WINDOWEXPOSED',
+                          'WINDOWMAXIMIZED', 'WINDOWRESTORED', 'VIDEORESIZE')
+                         if hasattr(pygame, n)}
 
         self.clock = pygame.time.Clock()
 
@@ -1244,8 +1267,19 @@ class Display:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
+                    if event.key == pygame.K_q:
                         running = False
+                    elif event.key == pygame.K_ESCAPE:
+                        # Esc leaves fullscreen if in it, otherwise quits.
+                        if self.fullscreen:
+                            self._toggle_fullscreen()
+                        else:
+                            running = False
+                    elif event.key in (pygame.K_f, pygame.K_F11):
+                        self._toggle_fullscreen()
+                elif event.type in resize_events:
+                    self.renderer.logical_size = (self.width, self.height)
+                    self._dirty = True
 
             self._poll_counter += 1
             if self._poll_counter >= 15:
@@ -1270,6 +1304,16 @@ class Display:
             self.clock.tick(30)
 
         pygame.quit()
+
+    def _toggle_fullscreen(self):
+        self.fullscreen = not self.fullscreen
+        if self.fullscreen:
+            self.window.set_fullscreen(desktop=True)
+        else:
+            self.window.set_windowed()
+        # New output size → recompute the letterbox scale, then redraw.
+        self.renderer.logical_size = (self.width, self.height)
+        self._dirty = True
 
     def _load_fonts(self):
         self._font_large = pygame.font.SysFont('sans', int(self.height * 0.03))
