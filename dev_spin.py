@@ -39,6 +39,7 @@ from lp.display import (Display, OUTER_GROOVE, INNER_GROOVE, RECORD_SUPERSAMPLE,
                         MUNAFO_VARIANTS)
 from lp.api import create_app
 from lpcore.library import Library
+from lpcore.vinyl.settings import VinylSettings
 
 WIN_W, WIN_H = 1000, 800
 WEB_PORT = 8000
@@ -55,19 +56,12 @@ def build_style_list():
 
 
 class MockPlayer:
-    """Just enough surface for the Display render helpers — no VLC, no audio."""
+    """Just enough surface for the Display render helpers — no VLC, no audio.
+
+    Vinyl display config lives in a VinylSettings (driven by arrow keys / the
+    web UI), not on the player.
+    """
     def __init__(self):
-        self.vinyl_style = 'black'
-        self.vinyl_label = 'art'
-        self.vinyl_brightness = 100
-        self.vinyl_label_text = 'curved'
-        self.vinyl_label_font = 'georgia'
-        self.vinyl_label_artist_color = 'auto'
-        self.vinyl_label_album_color = 'auto'
-        self.vinyl_label_decor1 = 'none'
-        self.vinyl_label_decor1_color = 'auto'
-        self.vinyl_label_decor2 = 'none'
-        self.vinyl_label_decor2_color = 'auto'
         self.album_path = '/dev/inspect'
         self._lock = threading.Lock()
 
@@ -75,11 +69,11 @@ class MockPlayer:
         pass  # Display subscribes to player events; we never fire them.
 
 
-def start_web_ui(player):
-    """Serve the real lp web UI on WEB_PORT, bound to our mock player.
+def start_web_ui(player, settings):
+    """Serve the real lp web UI on WEB_PORT, bound to our mock player + settings.
 
-    POST /api/settings/vinyl (and label/brightness) just mutate the player
-    attributes the render loop reads each frame — so the web UI controls the
+    POST /api/settings/vinyl (and label/brightness) mutate the shared
+    VinylSettings the render loop reads each frame — so the web UI controls the
     spinning record directly. No display/scrobbler/state needed for that.
     """
     here = os.path.dirname(os.path.abspath(__file__))
@@ -93,7 +87,7 @@ def start_web_ui(player):
     library = Library(music_path)  # empty/0 albums is fine; we only need settings
     from lp.state import UserState
     state = UserState(os.path.join(here, '.lp_state.json'))
-    app = create_app(player, library, static_dir, state=state)
+    app = create_app(player, library, static_dir, state=state, settings=settings)
     t = threading.Thread(
         target=uvicorn.run, args=(app,),
         kwargs={'host': '0.0.0.0', 'port': WEB_PORT, 'log_level': 'warning'},
@@ -112,9 +106,9 @@ def main():
 
     config = {'display': {'width': WIN_W, 'height': WIN_H, 'fullscreen': False}}
     player = MockPlayer()
-    player.vinyl_style = styles[idx]
-    disp = Display(config, player)
-    start_web_ui(player)
+    settings = VinylSettings(style=styles[idx])
+    disp = Display(config, player, settings=settings)
+    start_web_ui(player, settings)
 
     # --- Renderer setup (mirrors Display.run() without the player loop) ---
     os.environ.setdefault('SDL_HINT_RENDER_SCALE_QUALITY', '2')
@@ -168,14 +162,14 @@ def main():
                     running = False
                 elif e.key in (pygame.K_RIGHT, pygame.K_SPACE):
                     idx = (idx + 1) % len(styles)
-                    player.vinyl_style = styles[idx]
+                    settings.style = styles[idx]
                 elif e.key == pygame.K_LEFT:
                     idx = (idx - 1) % len(styles)
-                    player.vinyl_style = styles[idx]
+                    settings.style = styles[idx]
                 elif e.key == pygame.K_UP:
-                    player.vinyl_brightness = min(100, player.vinyl_brightness + 10)
+                    settings.brightness = min(100, settings.brightness + 10)
                 elif e.key == pygame.K_DOWN:
-                    player.vinyl_brightness = max(0, player.vinyl_brightness - 10)
+                    settings.brightness = max(0, settings.brightness - 10)
                 elif e.key == pygame.K_RIGHTBRACKET:
                     record_size = min(380, record_size + 20)
                 elif e.key == pygame.K_LEFTBRACKET:
@@ -184,7 +178,7 @@ def main():
                     seed += 1
                 elif e.key == pygame.K_s:
                     os.makedirs('dev_out', exist_ok=True)
-                    fn = f'dev_out/{player.vinyl_style.replace("/", "_")}.png'
+                    fn = f'dev_out/{settings.style.replace("/", "_")}.png'
                     pygame.image.save(renderer.to_surface(), fn)
                     print(f'saved {fn}')
 
@@ -194,19 +188,19 @@ def main():
             tracks_seed = seed
             boundaries, album_dur = make_tracks(seed)
 
-        cur_style = player.vinyl_style
+        cur_style = settings.style
         ap = album_path()
         style = disp._get_vinyl_style(ap) or {'type': 'black'}
 
         # Rebuild textures only when the inputs change. Sample metadata so the
         # label text renders in the inspector.
         SAMPLE_ARTIST, SAMPLE_ALBUM = 'KARMANDAKAH', 'DIAMOND MORNING'
-        bkey = (cur_style, player.vinyl_label, record_size,
-                player.vinyl_brightness, seed,
-                player.vinyl_label_text, player.vinyl_label_font,
-                player.vinyl_label_artist_color, player.vinyl_label_album_color,
-                player.vinyl_label_decor1, player.vinyl_label_decor1_color,
-                player.vinyl_label_decor2, player.vinyl_label_decor2_color)
+        bkey = (cur_style, settings.label, record_size,
+                settings.brightness, seed,
+                settings.label_text, settings.label_font,
+                settings.artist_color, settings.album_color,
+                settings.decor1, settings.decor1_color,
+                settings.decor2, settings.decor2_color)
         if bkey != body_key:
             body_key = bkey
             try:
@@ -228,7 +222,7 @@ def main():
                 grooves_tex = None
 
         # Fixed specular shine (depends only on style type / brightness / size).
-        skey = (style.get('type'), player.vinyl_brightness, record_size)
+        skey = (style.get('type'), settings.brightness, record_size)
         if skey != shine_key:
             shine_key = skey
             try:
@@ -271,7 +265,7 @@ def main():
 
         # HUD: live style id (+ list position when it's one of ours) + brightness
         pos = f'{styles.index(cur_style) + 1}/{len(styles)}' if cur_style in styles else 'web'
-        hud = f'[{pos}]  {cur_style}   label={player.vinyl_label}  bright={player.vinyl_brightness}%'
+        hud = f'[{pos}]  {cur_style}   label={settings.label}  bright={settings.brightness}%'
         tex, r = disp._text_tex('hud', disp._font_small, hud, (210, 210, 210))
         tex.draw(dstrect=pygame.Rect(20, 16, r.w, r.h))
 

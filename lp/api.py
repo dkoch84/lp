@@ -4,6 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
+from lpcore.vinyl.settings import VinylSettings
+from lpcore.vinyl.catalog import LABEL_TEXT_MODES, LABEL_TEXT_FONTS, DECOR_EMOJI
+
 
 class PlayRequest(BaseModel):
     path: str
@@ -49,13 +52,11 @@ class GridRequest(BaseModel):
     folders: list[str]
 
 
-LABEL_TEXT_MODES = ['none', 'curved', 'straight', 'blocky']
-LABEL_TEXT_FONTS = ['georgia', 'dejavuserif', 'dejavusans', 'dejavusansmono',
-                    'oswald', 'bebasneue', 'notoserif', 'notosans', 'ubuntu', 'cantarell']
-
-
-def create_app(player, library, static_dir, scrobbler=None, display=None, state=None):
+def create_app(player, library, static_dir, scrobbler=None, display=None,
+               state=None, settings=None):
     app = FastAPI(title="lp")
+    if settings is None:
+        settings = VinylSettings()
 
     @app.post("/api/share")
     def share():
@@ -202,7 +203,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
 
     @app.get("/api/settings/vinyl")
     def get_vinyl_style():
-        return {"style": player.vinyl_style}
+        return {"style": settings.style}
 
     @app.post("/api/settings/vinyl")
     def set_vinyl_style(req: VinylStyleRequest):
@@ -229,8 +230,8 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
                  + pattern_basic + pattern_combo)
         if req.style not in valid:
             raise HTTPException(400, f"Invalid style. Choose from: {', '.join(valid)}")
-        player.vinyl_style = req.style
-        return {"style": player.vinyl_style}
+        settings.style = req.style
+        return {"style": settings.style}
 
     @app.get("/api/settings/vinyl/options")
     def get_vinyl_options():
@@ -326,7 +327,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
 
     @app.get("/api/settings/label")
     def get_label():
-        return {"label": player.vinyl_label}
+        return {"label": settings.label}
 
     @app.post("/api/settings/label")
     def set_label(req: LabelRequest):
@@ -340,8 +341,8 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
                  + ['munafo-' + v[0] for v in MUNAFO_VARIANTS])
         if req.label not in valid:
             raise HTTPException(400, f"Invalid label. Choose from: {', '.join(valid)}")
-        player.vinyl_label = req.label
-        return {"label": player.vinyl_label}
+        settings.label = req.label
+        return {"label": settings.label}
 
     @app.get("/api/settings/label/options")
     def get_label_options():
@@ -368,15 +369,12 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
     # --- Label text (mode + font) ---
 
     def _label_text_state():
-        p = player
-        return {"mode": p.vinyl_label_text, "font": p.vinyl_label_font,
-                "artist_color": p.vinyl_label_artist_color,
-                "album_color": p.vinyl_label_album_color,
-                "decor1": p.vinyl_label_decor1, "decor1_color": p.vinyl_label_decor1_color,
-                "decor2": p.vinyl_label_decor2, "decor2_color": p.vinyl_label_decor2_color}
-
-    def _valid_color(c):
-        return c == 'auto' or (isinstance(c, str) and len(c) == 7 and c[0] == '#')
+        s = settings
+        return {"mode": s.label_text, "font": s.label_font,
+                "artist_color": s.artist_color,
+                "album_color": s.album_color,
+                "decor1": s.decor1, "decor1_color": s.decor1_color,
+                "decor2": s.decor2, "decor2_color": s.decor2_color}
 
     @app.get("/api/settings/label-text")
     def get_label_text():
@@ -384,33 +382,20 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
 
     @app.post("/api/settings/label-text")
     def set_label_text(req: LabelTextRequest):
-        from lp.display import DECOR_EMOJI
-        decor_vals = ['none', 'random'] + list(DECOR_EMOJI)
-        if req.mode is not None:
-            if req.mode not in LABEL_TEXT_MODES:
-                raise HTTPException(400, f"Invalid mode. Choose from: {', '.join(LABEL_TEXT_MODES)}")
-            player.vinyl_label_text = req.mode
-        if req.font is not None:
-            player.vinyl_label_font = req.font
-        for field, val in (('vinyl_label_artist_color', req.artist_color),
-                           ('vinyl_label_album_color', req.album_color),
-                           ('vinyl_label_decor1_color', req.decor1_color),
-                           ('vinyl_label_decor2_color', req.decor2_color)):
-            if val is not None:
-                if not _valid_color(val):
-                    raise HTTPException(400, f"Invalid color: {val}")
-                setattr(player, field, val)
-        for field, val in (('vinyl_label_decor1', req.decor1),
-                           ('vinyl_label_decor2', req.decor2)):
-            if val is not None:
-                if val not in decor_vals:
-                    raise HTTPException(400, f"Invalid decor. Choose from: {', '.join(decor_vals)}")
-                setattr(player, field, val)
+        # VinylSettings.update validates modes, fonts, colors, and decor centrally.
+        try:
+            settings.update(
+                label_text=req.mode, label_font=req.font,
+                artist_color=req.artist_color, album_color=req.album_color,
+                decor1=req.decor1, decor1_color=req.decor1_color,
+                decor2=req.decor2, decor2_color=req.decor2_color,
+            )
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         return _label_text_state()
 
     @app.get("/api/settings/label-text/options")
     def get_label_text_options():
-        from lp.display import DECOR_EMOJI
         fonts = LABEL_TEXT_FONTS
         try:
             import pygame.font as _pf
@@ -428,14 +413,15 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
 
     @app.get("/api/settings/brightness")
     def get_brightness():
-        return {"brightness": player.vinyl_brightness}
+        return {"brightness": settings.brightness}
 
     @app.post("/api/settings/brightness")
     def set_brightness(req: BrightnessRequest):
-        if not (0 <= req.brightness <= 100):
-            raise HTTPException(400, "Brightness must be 0-100")
-        player.vinyl_brightness = req.brightness
-        return {"brightness": player.vinyl_brightness}
+        try:
+            settings.update(brightness=req.brightness)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"brightness": settings.brightness}
 
     # --- Library management ---
 

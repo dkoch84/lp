@@ -13,6 +13,7 @@ from lpcore.scrobbler import Scrobbler
 from lp.api import create_app
 from lp.state import UserState
 from lp.launch import resolve_port, lan_ip
+from lpcore.vinyl.settings import VinylSettings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,14 +73,18 @@ def main():
     scrobbler = Scrobbler(player, lastfm_config)
     state_path = os.path.join(HERE, '.lp_state.json')
     state = UserState(state_path)
+    # Shared vinyl display config: the web API mutates it, the display reads it.
+    settings = VinylSettings()
 
     if args.no_display:
-        app = create_app(player, library, static_dir, scrobbler, state=state)
+        app = create_app(player, library, static_dir, scrobbler, state=state,
+                         settings=settings)
         uvicorn.run(app, host=host, port=port, log_level="info")
     else:
         from lp.display import Display
-        display = Display(config, player, port)
-        app = create_app(player, library, static_dir, scrobbler, display, state)
+        display = Display(config, player, port, settings=settings)
+        app = create_app(player, library, static_dir, scrobbler, display, state,
+                         settings=settings)
         api_thread = threading.Thread(
             target=uvicorn.run,
             args=(app,),

@@ -21,6 +21,7 @@ import pygame
 from mutagen.flac import FLAC
 
 from lp.display import Display, RECORD_SUPERSAMPLE
+from lpcore.vinyl.settings import VinylSettings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ALBUM_DIR = '/mnt/share/media/Music/Karmanjakah/2026 - Diamond morning'
@@ -37,22 +38,16 @@ ARTIST, ALBUM = 'KARMANJAKAH', 'DIAMOND MORNING'
 class IconPlayer:
     """Minimal player surface the Display render helpers read from."""
     def __init__(self):
-        self.vinyl_style = 'color-cyan'
-        self.vinyl_label = 'art'          # Diamond Morning cover as the label
-        self.vinyl_brightness = 100
-        self.vinyl_label_text = 'curved'
-        self.vinyl_label_font = 'georgia'
-        self.vinyl_label_artist_color = 'auto'
-        self.vinyl_label_album_color = 'auto'
-        self.vinyl_label_decor1 = 'none'
-        self.vinyl_label_decor1_color = 'auto'
-        self.vinyl_label_decor2 = 'none'
-        self.vinyl_label_decor2_color = 'auto'
         self.album_path = ALBUM_DIR
         self._lock = threading.Lock()
 
     def on(self, event, cb):
         pass
+
+
+# The cyan Diamond Morning look, as a VinylSettings.
+ICON_SETTINGS = VinylSettings(style='color-cyan', label='art',
+                              label_text='curved', label_font='georgia')
 
 
 def real_boundaries():
@@ -70,7 +65,7 @@ def main():
     pygame.init()
     player = IconPlayer()
     config = {'display': {'width': 1080, 'height': 1080, 'fullscreen': False}}
-    disp = Display(config, player)
+    disp = Display(config, player, settings=ICON_SETTINGS)
     disp.width = disp.height = 1080
     disp._load_fonts()
 

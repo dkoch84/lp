@@ -9,6 +9,9 @@ import pygame
 import pygame.gfxdraw
 from pygame._sdl2 import video as sdl2_video
 
+from lpcore.vinyl.settings import VinylSettings
+from lpcore.vinyl.catalog import DECOR_EMOJI
+
 
 DARK_BG = (17, 17, 17)
 PANEL_BG = (22, 22, 22)
@@ -32,15 +35,6 @@ LABEL_COLORS = {
     'purple':   ((100, 45, 140),  (72, 32, 100)),
 }
 NEEDLE_COLOR = (200, 200, 200)
-
-# Little decorative critters for the label's empty spaces (rendered via the
-# Noto Color Emoji font). 2 per label.
-DECOR_EMOJI = {
-    'bird': '🐦', 'dove': '🕊', 'owl': '🦉',
-    'sun': '☀', 'moon': '🌙', 'star': '⭐',
-    'octopus': '🐙', 'fish': '🐟',
-    'beaver': '🦫', 'dog': '🐕', 'cat': '🐈',
-}
 
 
 def _resolve_color(val, fallback):
@@ -1099,8 +1093,9 @@ def _pick_vinyl_style(album_path, override='random'):
 
 
 class Display:
-    def __init__(self, config, player, port=8000):
+    def __init__(self, config, player, port=8000, settings=None):
         self.player = player
+        self.settings = settings or VinylSettings()
         self.port = port
         self.config = config.get('display', {})
         self.fullscreen = self.config.get('fullscreen', False)
@@ -1579,7 +1574,7 @@ class Display:
 
     def _get_vinyl_style(self, album_path):
         """Get or compute vinyl style for current album."""
-        override = self.player.vinyl_style
+        override = self.settings.style
         cache_key = (album_path, override)
         if cache_key != (self._current_album_path, getattr(self, '_current_override', None)):
             self._current_album_path = album_path
@@ -1640,9 +1635,9 @@ class Display:
         # fractal disc) since those use the body all the way through.
         if style_type not in ('picture', 'pattern'):
             label_r = int(size * LABEL_RADIUS)
-            label_setting = self.player.vinyl_label
-            text_mode = self.player.vinyl_label_text
-            text_font = self.player.vinyl_label_font
+            label_setting = self.settings.label
+            text_mode = self.settings.label_text
+            text_font = self.settings.label_font
 
             # Text + decorations render over EVERY label type except the
             # full-disc picture/pattern styles (handled by the outer guard).
@@ -1692,21 +1687,21 @@ class Display:
                 pygame.draw.circle(surf, VINYL_LABEL, center, label_r)
                 label_accent = VINYL_LABEL_DARK
 
-            p = self.player
+            p = self.settings
             vertical = text_mode in ('straight', 'blocky')
             # Don't scribble fake chickenscratch over an image label; real text
             # (when there's metadata) and decorations are fine everywhere.
             if artist or album or not is_image:
-                artist_col = _resolve_color(p.vinyl_label_artist_color, label_accent)
-                album_col = _resolve_color(p.vinyl_label_album_color, label_accent)
+                artist_col = _resolve_color(p.artist_color, label_accent)
+                album_col = _resolve_color(p.album_color, label_accent)
                 self._draw_label_text(surf, size, size, label_r, label_accent,
                                       artist, album, text_mode, text_font,
                                       artist_col, album_col)
-            d1, d2 = p.vinyl_label_decor1, p.vinyl_label_decor2
+            d1, d2 = p.decor1, p.decor2
             if (d1 and d1 != 'none') or (d2 and d2 != 'none'):
                 slots = [
-                    (d1, _resolve_color(p.vinyl_label_decor1_color, label_accent)),
-                    (d2, _resolve_color(p.vinyl_label_decor2_color, label_accent)),
+                    (d1, _resolve_color(p.decor1_color, label_accent)),
+                    (d2, _resolve_color(p.decor2_color, label_accent)),
                 ]
                 seed = abs(hash(album_path or '')) % (1 << 30)
                 self._draw_label_decor(surf, size, size, label_r, slots, seed, vertical)
@@ -1715,7 +1710,7 @@ class Display:
         pygame.draw.circle(surf, DARK_BG, center, int(size * 0.04))
 
         # Brightness adjustment
-        brightness = self.player.vinyl_brightness
+        brightness = self.settings.brightness
         if brightness < 100:
             alpha = int(255 * (1 - brightness / 100))
             dim = pygame.Surface((d, d), pygame.SRCALPHA)
@@ -1785,7 +1780,7 @@ class Display:
                                    boundaries=boundaries, album_dur=album_dur,
                                    gap_half_width=2)
 
-        brightness = self.player.vinyl_brightness
+        brightness = self.settings.brightness
         if brightness < 100:
             arr = pygame.surfarray.pixels_alpha(surf)
             arr[:] = (arr.astype(np.float32) * brightness / 100).astype(np.uint8)
@@ -1857,7 +1852,7 @@ class Display:
             outside_label = np.clip(r - label_r + 0.5, 0.0, 1.0)
             alpha_frac = alpha_frac * outside_label
 
-        brightness = self.player.vinyl_brightness
+        brightness = self.settings.brightness
         if brightness < 100:
             alpha_frac = alpha_frac * (brightness / 100.0)
 
@@ -2403,12 +2398,12 @@ class Display:
             album_path = self.player.album_path
 
         # Body: supersampled texture, GPU downscales 2:1 during draw.
-        body_key = (album_path, self.player.vinyl_style, self.player.vinyl_label,
-                    self.player.vinyl_brightness, record_size, 'body',
-                    self.player.vinyl_label_text, self.player.vinyl_label_font,
-                    self.player.vinyl_label_artist_color, self.player.vinyl_label_album_color,
-                    self.player.vinyl_label_decor1, self.player.vinyl_label_decor1_color,
-                    self.player.vinyl_label_decor2, self.player.vinyl_label_decor2_color,
+        body_key = (album_path, self.settings.style, self.settings.label,
+                    self.settings.brightness, record_size, 'body',
+                    self.settings.label_text, self.settings.label_font,
+                    self.settings.artist_color, self.settings.album_color,
+                    self.settings.decor1, self.settings.decor1_color,
+                    self.settings.decor2, self.settings.decor2_color,
                     status.get('artist'), status.get('album'))
         if body_key != self._record_texture_key:
             self._record_texture_key = body_key
@@ -2421,7 +2416,7 @@ class Display:
         # rotated with the body. Avoids moiré from sampling dense rings.
         style = self._get_vinyl_style(album_path) or {'type': 'black'}
         grooves_key = (style.get('type'), style.get('color'), style.get('variant'),
-                       self.player.vinyl_brightness, record_size, tuple(boundaries))
+                       self.settings.brightness, record_size, tuple(boundaries))
         if grooves_key != self._grooves_texture_key:
             self._grooves_texture_key = grooves_key
             grooves_surf, blend_mode = self._build_grooves_overlay(record_size, style, boundaries, album_dur)
@@ -2431,7 +2426,7 @@ class Display:
 
         # Specular shine: built per (style type, brightness, size) — independent
         # of rotation and album, since it's the fixed room-light reflection.
-        shine_key = (style.get('type'), self.player.vinyl_brightness, record_size)
+        shine_key = (style.get('type'), self.settings.brightness, record_size)
         if shine_key != self._shine_texture_key:
             self._shine_texture_key = shine_key
             shine_surf = self._build_shine_overlay(record_size, style)
