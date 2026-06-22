@@ -38,8 +38,8 @@ class VinylRenderer:
         self._current_vinyl_style = None
         self._current_album_path = None
         self._current_override = None
-        self._pattern_label_cache = None
-        self._julia_label_cache = None
+        self._pattern_label_cache = {}   # keyed (label_setting, label_r)
+        self._julia_label_cache = {}     # keyed (name, label_r)
 
     def _get_circular_art(self, art_path, radius):
         """Get album art masked into a circle at the given radius."""
