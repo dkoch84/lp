@@ -8,6 +8,7 @@
 
 What lands in this release:
 
+- **True gapless playback** — albums now cross track boundaries seamlessly. The next track is preloaded and the audio output is never torn down, so a reverb tail or ambient bed that flows from one track into the next no longer drops a blip at the seam.
 - **New cyan colorway** — the disc in the shot above.
 - **Glossy shine** — a fixed specular reflection that stays put as the record spins (the room light doesn't rotate with the disc).
 - **Album labels with real text** — artist and album rendered curved around the spindle, with a font picker, color controls, and two layers of decor rings.

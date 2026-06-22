@@ -11,12 +11,22 @@ AUDIO_EXTENSIONS = ('.mp3', '.flac')
 
 
 class PlayerBackend:
-    def __init__(self):
-        self._instance = vlc.Instance('--aout=alsa')
+    def __init__(self, audio_output='alsa'):
+        self._instance = vlc.Instance(f'--aout={audio_output}')
+        # MediaListPlayer drives a MediaList for gapless playback: it preloads
+        # the next item and switches without tearing down the audio output, so
+        # albums with continuous audio across a track boundary (e.g. a reverb
+        # tail or ambient bed flowing from one track into the next) play without
+        # the dropout a per-track set_media()/play() reload would introduce.
+        self._list_player = self._instance.media_list_player_new()
         self.player = self._instance.media_player_new()
+        self._list_player.set_media_player(self.player)
+        self._media_list = None
+        # MRL of each track in album order; used to resolve the authoritative
+        # current index from the player on each NextItemSet event.
+        self._mrls = []
         self._lock = threading.Lock()
         self._callbacks = {}
-        self._media_ended = False
         self._playing = False
 
         self.vinyl_style = 'random'
@@ -40,37 +50,39 @@ class PlayerBackend:
         self.album_duration = 0.0
 
         self._attach_events()
-        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._poll_thread.start()
 
     def _attach_events(self):
-        em = self.player.event_manager()
+        em = self._list_player.event_manager()
         if em:
-            em.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_media_end)
+            em.event_attach(vlc.EventType.MediaListPlayerNextItemSet, self._on_next_item)
+            em.event_attach(vlc.EventType.MediaListPlayerPlayed, self._on_list_end)
 
-    def _on_media_end(self, event):
-        self._media_ended = True
-
-    def _poll_loop(self):
-        while True:
-            if self._media_ended:
-                self._media_ended = False
-                self._advance_track()
-            threading.Event().wait(0.1)
-
-    def _advance_track(self):
-        event = None
+    def _on_next_item(self, event):
+        # Fired once per item as the list player advances (including the first
+        # item at play start). Resolve the index from the player's current
+        # media rather than counting, so a missed/duplicate event can't desync.
+        fire = None
         with self._lock:
-            if self.current_song_index + 1 < len(self.album):
-                self.current_song_index += 1
-                self.player.set_media(self._instance.media_new(self.album[self.current_song_index]))
-                self.player.play()
-                event = 'track_change'
-            else:
-                self._playing = False
-                event = 'album_end'
-        if event:
-            self._fire(event)
+            if not self._playing:
+                return
+            media = self.player.get_media()
+            if media is None:
+                return
+            try:
+                idx = self._mrls.index(media.get_mrl())
+            except ValueError:
+                return
+            if idx == self.current_song_index:
+                return  # initial item — already reflected by play_start
+            self.current_song_index = idx
+            fire = 'track_change'
+        if fire:
+            self._fire(fire)
+
+    def _on_list_end(self, event):
+        with self._lock:
+            self._playing = False
+        self._fire('album_end')
 
     def on(self, event, callback):
         self._callbacks.setdefault(event, []).append(callback)
@@ -103,6 +115,13 @@ class PlayerBackend:
             boundaries.append(cumulative)
             cumulative += dur
 
+        media_list = self._instance.media_list_new()
+        mrls = []
+        for f in files:
+            m = self._instance.media_new(f)
+            media_list.add_media(m)
+            mrls.append(m.get_mrl())
+
         with self._lock:
             self.album_path = album_path
             self.album = files
@@ -111,15 +130,17 @@ class PlayerBackend:
             self.track_boundaries = boundaries
             self.album_duration = cumulative
             self._playing = True
+            self._media_list = media_list
+            self._mrls = mrls
 
-        self.player.set_media(self._instance.media_new(files[0]))
-        self.player.play()
+        self._list_player.set_media_list(media_list)
+        self._list_player.play()
         self._fire('play_start')
 
     def stop(self):
         with self._lock:
             self._playing = False
-        self.player.stop()
+        self._list_player.stop()
         self._fire('stop')
 
     def _get_file_duration(self, file_path):
@@ -247,4 +268,5 @@ class PlayerBackend:
 
     def shutdown(self):
         self.stop()
+        self._list_player.release()
         self.player.release()

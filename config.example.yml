@@ -1,5 +1,9 @@
 music_library_path: /path/to/music
 
+# VLC audio output module: alsa (default), pulse, etc. Use pulse on a
+# PipeWire/PulseAudio desktop so audio follows your default sink.
+# audio_output: alsa
+
 display:
   fullscreen: false
   width: 1920

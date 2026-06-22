@@ -31,7 +31,7 @@ def main():
     url = f"http://localhost:{port}"
     print(f"\n  lp remote: {url}\n")
 
-    player = PlayerBackend()
+    player = PlayerBackend(audio_output=config.get('audio_output', 'alsa'))
     library = Library(music_path)
     lastfm_config = config.get('lastfm', {})
     scrobbler = Scrobbler(player, lastfm_config)
