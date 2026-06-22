@@ -193,6 +193,11 @@ def create_app(player, library, static_dir, scrobbler=None, display=None, state=
     def status():
         return player.get_status()
 
+    @app.get("/api/version")
+    def version():
+        from lp.version import get_version
+        return get_version()
+
     # --- Settings ---
 
     @app.get("/api/settings/vinyl")

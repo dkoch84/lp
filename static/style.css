@@ -407,3 +407,49 @@ main {
 #np-stop:active {
   background: #444;
 }
+
+/* --- Brand lockup (header, top-left): release vinyl + lp wordmark + release --- */
+#brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  color: inherit;
+}
+
+#brand-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
+#brand-wordmark {
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #eee;
+}
+
+#brand-release {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: #888;
+  padding: 2px 8px;
+  border: 1px solid #2bbbd0;  /* cyan, matching the release vinyl */
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+
+#brand-release:empty {
+  display: none;  /* no chip until the release name loads (or if it fails) */
+}
+
+#brand:hover #brand-release {
+  color: #0b1416;
+  background: #2bbbd0;
+}

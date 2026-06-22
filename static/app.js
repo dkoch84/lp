@@ -16,6 +16,8 @@ const sortSelect = $('#sort');
 const albumControls = $('#album-controls');
 const albumSortBtn = $('#album-sort');
 const albumGridSelectBtn = $('#album-grid-select');
+const brand = $('#brand');
+const brandRelease = $('#brand-release');
 
 let currentArtist = null;
 let statusInterval = null;
@@ -190,7 +192,9 @@ async function showArtists() {
   artistControls.classList.remove('hidden');
   searchInput.value = '';
   backBtn.classList.add('hidden');
-  headerTitle.textContent = 'lp';
+  headerTitle.textContent = '';
+  headerTitle.classList.add('hidden');
+  brand.classList.remove('hidden');
 
   allArtists = await api('/api/artists');
   renderArtists();
@@ -207,6 +211,8 @@ async function showAlbums(artistName) {
   albumControls.classList.remove('hidden');
   backBtn.classList.remove('hidden');
   headerTitle.textContent = artistName;
+  headerTitle.classList.remove('hidden');
+  brand.classList.add('hidden');
 
   currentAlbums = await api(`/api/artists/${encodeURIComponent(artistName)}/albums`);
   renderAlbums();
@@ -351,8 +357,21 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// --- Release badge ---
+
+async function loadVersion() {
+  try {
+    const v = await api('/api/version');
+    brandRelease.textContent = v.release || '';
+    if (v.describe) brand.title = `lp ${v.describe} — release notes`;
+  } catch {
+    brandRelease.textContent = '';  // leave the lp wordmark, drop the release tag
+  }
+}
+
 // --- Init ---
 
 showArtists();
+loadVersion();
 statusInterval = setInterval(pollStatus, 3000);
 pollStatus();
