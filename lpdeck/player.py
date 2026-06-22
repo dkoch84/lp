@@ -1,13 +1,9 @@
-"""QueuePlayer — track-level queue on top of lpcore.PlayerBackend (req #3).
+"""QueuePlayer — a play queue over lpcore.PlayerBackend (req #3).
 
-lpcore's PlayerBackend is album-oriented (play_album → builds a VLC MediaList
-from a directory's files). lp-deck needs an arbitrary queue of tracks, so this
-wraps it and manages queue order, current index, and prev/next.
-
-NOTE: a clean implementation needs a small lpcore addition —
-`PlayerBackend.play_tracks(files, album_path=None)` (generalise play_album to an
-explicit file list). Until then the transport methods are stubs that hold the
-queue model so the UI can be built against the final shape.
+The backend loads the whole track list and advances through it gaplessly (the lp
+"magic"), so this is a thin wrapper: set_queue loads the list, and prev/next/
+pause delegate to the backend's list player. `queue` keeps the display rows
+(track dicts) parallel to what's loaded; the backend owns the play position.
 """
 
 
@@ -16,43 +12,32 @@ class QueuePlayer:
         self.backend = backend          # lpcore.player.PlayerBackend
         self.scrobbler = scrobbler       # lpcore.scrobbler.Scrobbler
         self.queue = []                  # list of track dicts (path, title, …)
-        self.index = -1
 
-    def set_queue(self, tracks, start=0):
+    def set_queue(self, tracks, start=0, album_path=None):
+        """Replace the queue with `tracks` (dicts incl. 'path') and start playing
+        at index `start`."""
         self.queue = list(tracks)
-        self.index = start if self.queue else -1
-        self._play_current()
-
-    def enqueue(self, track):
-        self.queue.append(track)
-
-    def _play_current(self):
-        if not (0 <= self.index < len(self.queue)):
+        if not self.queue:
             return
-        # TODO: backend.play_tracks([t['path'] for t in self.queue], start=self.index)
-        # For now, fall back to album playback of the current track's album.
-        track = self.queue[self.index]
-        album_dir = track.get("album_path")
-        if album_dir:
-            self.backend.play_album(album_dir)
+        self.backend.play_tracks([t["path"] for t in self.queue],
+                                 album_path=album_path, start=start)
+
+    @property
+    def index(self):
+        return self.backend.current_song_index
+
+    def current(self):
+        i = self.index
+        return self.queue[i] if 0 <= i < len(self.queue) else None
 
     def next(self):
-        if self.index + 1 < len(self.queue):
-            self.index += 1
-            self._play_current()
+        self.backend.next_track()
 
     def previous(self):
-        if self.index > 0:
-            self.index -= 1
-            self._play_current()
+        self.backend.prev_track()
 
     def toggle(self):
-        # TODO: backend pause/resume; stop for now
-        status = self.backend.get_status()
-        if status.get("playing"):
-            self.backend.stop()
-        else:
-            self._play_current()
+        self.backend.toggle_pause()
 
     def shutdown(self):
         self.backend.shutdown()

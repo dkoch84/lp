@@ -77,6 +77,14 @@ QWidget#nowPlaying {
 }
 QLabel#npTitle { font-size: 15px; font-weight: 600; }
 QLabel#npSub   { color: palette(mid); }
+
+/* library column headers */
+QLabel#colHeader {
+    color: palette(mid);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 4px;
+}
 """
 
 

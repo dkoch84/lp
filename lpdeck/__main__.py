@@ -5,12 +5,13 @@ the same config.yml the kiosk uses, by default.
 """
 import os
 import sys
+import threading
 
 import yaml
 
 from lpcore.player import PlayerBackend
 from lpcore.scrobbler import Scrobbler
-from . import db
+from . import db, indexer
 from .player import QueuePlayer
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,7 +33,9 @@ def main():
     from . import theme
 
     config = _load_config()
-    con = db.connect(os.path.join(DATA_DIR, "library.db"))
+    music_path = config.get("music_library_path", "/mnt/share/media/Music")
+    db_path = os.path.join(DATA_DIR, "library.db")
+    con = db.connect(db_path)
 
     backend = PlayerBackend(audio_output=config.get("audio_output", "alsa"))
     scrobbler = Scrobbler(backend, config.get("lastfm", {}))   # req #9
@@ -42,6 +45,16 @@ def main():
     theme.apply(app)            # minimalist polish over the inherited qt6ct/Plasma theme
     win = MainWindow(con, player)
     win.show()
+
+    # Index the library in the background (own connection — sqlite isn't shared
+    # across threads), then refresh the view via the queued signal.
+    def reindex():
+        c = db.connect(db_path)
+        indexer.index_library(c, music_path)
+        c.close()
+        win.library_indexed.emit()
+    threading.Thread(target=reindex, daemon=True).start()
+
     try:
         sys.exit(app.exec())
     finally:
