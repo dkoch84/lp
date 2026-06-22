@@ -120,14 +120,19 @@ class PlayerBackend:
         if not files:
             print(f"No audio files in {album_path}")
             return
+        self.play_tracks(files, album_path=album_path)
 
-        durations = []
-        for f in files:
-            dur = self._get_file_duration(f)
-            durations.append(dur)
+    def play_tracks(self, files, album_path=None, start=0):
+        """Play an explicit list of track paths gaplessly (a queue), starting at
+        index ``start``. ``album_path`` is optional context (used for vinyl style
+        selection + logging). play_album() is just this over a directory listing.
+        """
+        files = list(files)
+        if not files:
+            return
 
-        boundaries = []
-        cumulative = 0.0
+        durations = [self._get_file_duration(f) for f in files]
+        boundaries, cumulative = [], 0.0
         for dur in durations:
             boundaries.append(cumulative)
             cumulative += dur
@@ -142,7 +147,7 @@ class PlayerBackend:
         with self._lock:
             self.album_path = album_path
             self.album = files
-            self.current_song_index = 0
+            self.current_song_index = max(0, min(start, len(files) - 1))
             self.track_durations = durations
             self.track_boundaries = boundaries
             self.album_duration = cumulative
@@ -150,12 +155,16 @@ class PlayerBackend:
             self._media_list = media_list
             self._mrls = mrls
             self._last_end_t = None
+            start_idx = self.current_song_index
 
-        log.info("play_album: %s — %d tracks, %.0fs, aout=%s",
-                 os.path.basename(album_path.rstrip('/')), len(files), cumulative,
-                 self._audio_output)
+        ctx = os.path.basename(album_path.rstrip('/')) if album_path else f"{len(files)} tracks"
+        log.info("play: %s — %d tracks, %.0fs, start=%d, aout=%s",
+                 ctx, len(files), cumulative, start_idx, self._audio_output)
         self._list_player.set_media_list(media_list)
-        self._list_player.play()
+        if start_idx:
+            self._list_player.play_item_at_index(start_idx)
+        else:
+            self._list_player.play()
         self._fire('play_start')
 
     def stop(self):
@@ -163,6 +172,17 @@ class PlayerBackend:
             self._playing = False
         self._list_player.stop()
         self._fire('stop')
+
+    def next_track(self):
+        """Skip to the next item in the loaded list (no-op past the end)."""
+        self._list_player.next()
+
+    def prev_track(self):
+        self._list_player.previous()
+
+    def toggle_pause(self):
+        """Pause/resume the current track (VLC pause toggles)."""
+        self._list_player.pause()
 
     def _get_file_duration(self, file_path):
         try:
