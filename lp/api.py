@@ -102,6 +102,35 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
             for a in library.get_artists()
         ]
 
+    @app.get("/api/recent")
+    def list_recent():
+        """The most recently played albums, most-recent-first.
+
+        Entries whose artist or album no longer exists in the library
+        (renamed, moved, or removed) are silently skipped.
+        """
+        if not state:
+            return []
+        out = []
+        for entry in state.get_recent_albums():
+            artist = library.get_artist(entry['artist'])
+            if not artist:
+                continue
+            album = next(
+                (al for al in artist.albums
+                 if al.folder_name == entry['folder']), None)
+            if not album:
+                continue
+            out.append({
+                "artist": entry['artist'],
+                "folder": album.folder_name,
+                "name": album.display_name,
+                "year": album.year,
+                "has_cover": album.cover_path is not None,
+                "last_played": entry['ts'],
+            })
+        return out
+
     @app.post("/api/artists/{name}/grid")
     def set_grid_covers(name: str, req: GridRequest):
         if not state:
@@ -183,6 +212,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
         player.play_album(req.path)
         if state:
             state.mark_played(album.artist)
+            state.mark_album_played(album.artist, album.folder_name)
         return {"status": "playing", "album": album.display_name}
 
     @app.post("/api/stop")

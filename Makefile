@@ -8,8 +8,9 @@ check: lint test          ## lint + smoke test (run before pushing)
 lint:                     ## static checks: undefined names, dead imports
 	ruff check --select F $(SRC)
 
-test:                     ## render smoke + settings tests (headless)
+test:                     ## render smoke + settings + state tests (headless)
 	$(PY) tests/test_render.py
+	$(PY) tests/test_state.py
 
 fix:                      ## auto-fix what ruff can
 	ruff check --select F --fix $(SRC)

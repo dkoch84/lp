@@ -1,6 +1,8 @@
 const $ = (sel) => document.querySelector(sel);
 
 const artistGrid = $('#artist-grid');
+const recentSection = $('#recent-section');
+const recentGrid = $('#recent-grid');
 const albumGrid = $('#album-grid');
 const backBtn = $('#back-btn');
 const headerTitle = $('#header-title');
@@ -22,6 +24,7 @@ const brandRelease = $('#brand-release');
 let currentArtist = null;
 let statusInterval = null;
 let allArtists = [];
+let recentAlbums = [];
 let currentAlbums = [];
 let currentSort = localStorage.getItem('lp.artistSort') || 'alpha';
 sortSelect.value = currentSort;
@@ -127,10 +130,50 @@ function sortArtists(artists) {
   return arr;
 }
 
+// --- Recently played ---
+
+function renderRecent() {
+  // Only meaningful on the top-level artist view with no active search —
+  // a filtered/album view shouldn't carry the recent shelf.
+  const searching = searchInput.value.trim() !== '';
+  if (currentArtist !== null || searching || recentAlbums.length === 0) {
+    recentSection.classList.add('hidden');
+    recentGrid.innerHTML = '';
+    return;
+  }
+
+  recentGrid.innerHTML = '';
+  for (const a of recentAlbums) {
+    const tile = document.createElement('div');
+    tile.className = 'album-tile';
+    tile.innerHTML = `
+      ${a.has_cover
+        ? `<img class="album-cover" src="${coverUrl(a.artist, a.folder, 'thumb')}" alt="" loading="lazy">`
+        : `<div class="album-cover-placeholder">&#9835;</div>`
+      }
+      <div class="album-title">${esc(a.name)}</div>
+      <div class="album-year">${esc(a.artist)}</div>
+    `;
+    tile.addEventListener('click', () => playAlbum(a.artist, a.folder));
+    recentGrid.appendChild(tile);
+  }
+  recentSection.classList.remove('hidden');
+}
+
+async function loadRecent() {
+  try {
+    recentAlbums = await api('/api/recent');
+  } catch {
+    recentAlbums = [];
+  }
+  renderRecent();
+}
+
 function renderArtists() {
   const q = searchInput.value.toLowerCase();
   const filtered = allArtists.filter(a => a.name.toLowerCase().includes(q));
   const sorted = sortArtists(filtered);
+  renderRecent();
 
   artistGrid.innerHTML = '';
   for (const a of sorted) {
@@ -198,6 +241,7 @@ async function showArtists() {
 
   allArtists = await api('/api/artists');
   renderArtists();
+  loadRecent();
 }
 
 // --- Album grid ---
@@ -209,6 +253,7 @@ async function showAlbums(artistName) {
   artistControls.classList.add('hidden');
   albumGrid.classList.remove('hidden');
   albumControls.classList.remove('hidden');
+  recentSection.classList.add('hidden');
   backBtn.classList.remove('hidden');
   headerTitle.textContent = artistName;
   headerTitle.classList.remove('hidden');
@@ -320,6 +365,8 @@ async function playAlbum(artistName, folder) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({path: info.path}),
   });
+  // Reflect the just-played album in the Recently Played shelf.
+  loadRecent();
 }
 
 // --- Stop ---
