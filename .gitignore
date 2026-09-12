@@ -18,6 +18,7 @@ lpcore/cache/
 .lp_launch.json
 image.png
 image-*.png
+_shot_art.png
 .ruff_cache/
 .pytest_cache/
 # lp-studio local template saves (user-generated; not shared yet)
