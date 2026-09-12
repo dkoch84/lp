@@ -18,6 +18,10 @@ const sortSelect = $('#sort');
 const albumControls = $('#album-controls');
 const albumSortBtn = $('#album-sort');
 const albumGridSelectBtn = $('#album-grid-select');
+const trackSheet = $('#track-sheet');
+const trackSheetBackdrop = $('#track-sheet-backdrop');
+const trackSheetTitle = $('#track-sheet-title');
+const trackSheetList = $('#track-sheet-list');
 const brand = $('#brand');
 const brandRelease = $('#brand-release');
 
@@ -31,6 +35,7 @@ sortSelect.value = currentSort;
 let albumSortDir = localStorage.getItem('lp.albumSort') || 'asc';
 let gridMode = false;        // collage cover-selection mode
 let gridSelection = [];      // ordered album folders chosen for the collage
+let lastStatus = null;       // most recent /api/status, for the track sheet
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -155,6 +160,7 @@ function renderRecent() {
       <div class="album-year">${esc(a.artist)}</div>
     `;
     tile.addEventListener('click', () => playAlbum(a.artist, a.folder));
+    attachHold(tile, () => openTrackSheet(a.artist, a.folder, a.name));
     recentGrid.appendChild(tile);
   }
   recentSection.classList.remove('hidden');
@@ -312,6 +318,7 @@ function renderAlbums() {
       // Albums with no cover art can't appear in the collage — not selectable.
     } else {
       tile.addEventListener('click', () => playAlbum(currentArtist, a.folder));
+      attachHold(tile, () => openTrackSheet(currentArtist, a.folder, a.name));
     }
     albumGrid.appendChild(tile);
   }
@@ -358,16 +365,114 @@ albumGridSelectBtn.addEventListener('click', async () => {
 
 // --- Play ---
 
-async function playAlbum(artistName, folder) {
+async function playAlbum(artistName, folder, start = 0) {
   const info = await api(`/api/albums/${encodeURIComponent(artistName)}/${encodeURIComponent(folder)}/tracks`);
   await api('/api/play', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({path: info.path}),
+    body: JSON.stringify({path: info.path, start}),
   });
   // Reflect the just-played album in the Recently Played shelf.
   loadRecent();
 }
+
+// --- Track sheet ---
+// Hold an album tile to start it from a chosen track instead of from the top.
+// No affordance, by design: putting the record on is the point, and skipping
+// into the middle of one is a build/test escape hatch.
+
+const LONG_PRESS_MS = 600;
+const LONG_PRESS_SLOP = 10;   // px of finger drift still counted as a hold
+
+function attachHold(el, onHold) {
+  let timer = null, sx = 0, sy = 0, fired = false;
+
+  const cancel = () => {
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+  };
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== undefined && e.button !== 0) return;   // right-click is not a hold
+    fired = false;
+    sx = e.clientX; sy = e.clientY;
+    cancel();
+    timer = setTimeout(() => {
+      timer = null;
+      fired = true;
+      onHold();
+    }, LONG_PRESS_MS);
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (timer === null) return;
+    if (Math.abs(e.clientX - sx) > LONG_PRESS_SLOP ||
+        Math.abs(e.clientY - sy) > LONG_PRESS_SLOP) cancel();   // a scroll, not a hold
+  });
+
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+    el.addEventListener(ev, cancel);
+  }
+
+  // The click that follows the release would otherwise also play from track 1.
+  el.addEventListener('click', (e) => {
+    if (!fired) return;
+    fired = false;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }, true);
+
+  // Suppress the touch callout / context menu a long press raises on mobile.
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+function closeTrackSheet() {
+  trackSheet.classList.add('hidden');
+  trackSheetList.innerHTML = '';
+}
+
+async function openTrackSheet(artistName, folder, albumName) {
+  let info;
+  try {
+    info = await api(`/api/albums/${encodeURIComponent(artistName)}/${encodeURIComponent(folder)}/tracks`);
+  } catch {
+    return;
+  }
+  if (!info.tracks || info.tracks.length === 0) return;
+
+  // Mark the current track when this is the album already spinning, so
+  // picking up where it stopped does not mean counting rows.
+  const playingHere = lastStatus && lastStatus.playing &&
+    lastStatus.artist === artistName && lastStatus.album === albumName;
+  const currentIndex = playingHere ? (lastStatus.track_number || 0) - 1 : -1;
+
+  trackSheetTitle.textContent = albumName || folder;
+  trackSheetList.innerHTML = '';
+  info.tracks.forEach((name, i) => {
+    const li = document.createElement('li');
+    if (i === currentIndex) li.classList.add('current');
+    // Filenames, not tags: when a track misbehaves it is the file you want
+    // to see. Only the extension is trimmed.
+    const label = name.replace(/\.[^.]+$/, '');
+    li.innerHTML = `<span class="track-sheet-no">${i + 1}</span>` +
+                   `<span class="track-sheet-name">${esc(label)}</span>`;
+    li.addEventListener('click', async () => {
+      closeTrackSheet();
+      await playAlbum(artistName, folder, i);
+    });
+    trackSheetList.appendChild(li);
+  });
+
+  trackSheet.classList.remove('hidden');
+  if (currentIndex > 0) {
+    const li = trackSheetList.children[currentIndex];
+    if (li) li.scrollIntoView({block: 'center'});
+  }
+}
+
+trackSheetBackdrop.addEventListener('click', closeTrackSheet);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !trackSheet.classList.contains('hidden')) closeTrackSheet();
+});
 
 // --- Stop ---
 
@@ -386,6 +491,7 @@ backBtn.addEventListener('click', () => {
 async function pollStatus() {
   try {
     const s = await api('/api/status');
+    lastStatus = s;
     if (s.playing) {
       nowPlaying.classList.remove('hidden');
       npTrack.textContent = s.track_title || `Track ${s.track_number}`;

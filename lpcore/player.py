@@ -141,7 +141,7 @@ class PlayerBackend:
             except Exception as e:
                 print(f"Callback error ({event}): {e}")
 
-    def play_album(self, album_path):
+    def play_album(self, album_path, start=0):
         files = sorted(
             os.path.join(album_path, f)
             for f in os.listdir(album_path)
@@ -150,7 +150,7 @@ class PlayerBackend:
         if not files:
             print(f"No audio files in {album_path}")
             return
-        self.play_tracks(files, album_path=album_path)
+        self.play_tracks(files, album_path=album_path, start=start)
 
     def play_tracks(self, files, album_path=None, start=0, paused=False,
                     start_offset=0.0):

@@ -10,6 +10,7 @@ from lpcore.vinyl.catalog import LABEL_TEXT_MODES, LABEL_TEXT_FONTS, DECOR_EMOJI
 
 class PlayRequest(BaseModel):
     path: str
+    start: int = 0
 
 
 class VinylStyleRequest(BaseModel):
@@ -209,7 +210,15 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
         album = library.get_album_by_path(req.path)
         if not album:
             raise HTTPException(400, "Album path not in library")
-        player.play_album(req.path)
+        if req.start:
+            # Starting mid-album is a build/test affordance, not the normal
+            # path: the whole point of lp is that you put the record on. The
+            # index counts into the same sorted listing play_album() walks, so
+            # it lines up with /tracks.
+            count = len(library.get_album_tracks(req.path))
+            if not 0 <= req.start < count:
+                raise HTTPException(400, f"start out of range (0..{count - 1})")
+        player.play_album(req.path, start=req.start)
         if state:
             state.mark_played(album.artist)
             state.mark_album_played(album.artist, album.folder_name)
