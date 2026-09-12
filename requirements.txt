@@ -1,3 +1,4 @@
+# lpcore + lp (kiosk / web UI)
 python-vlc
 pyyaml
 mutagen
@@ -6,4 +7,9 @@ uvicorn[standard]
 pygame-ce
 numpy
 pylast
+
+# lp-deck + lp-studio (desktop Qt apps); lpcore and lp never import Qt
+PySide6>=6.11
+
+# lp-deck: MPRIS2 / media keys (optional at runtime, degrades to a no-op)
 dbus-next
