@@ -110,16 +110,27 @@ def connect(db_path):
 # --- vinyl override resolution (req #7) ---
 
 def get_vinyl_override(con, scope, scope_id=None):
+    # Newest row wins. Databases written before the set_vinyl_override fix below
+    # can hold several global rows; without the ORDER BY, SQLite hands back the
+    # oldest and the setting looks frozen at its first-ever value.
     row = con.execute(
-        "SELECT settings FROM vinyl_overrides WHERE scope=? AND scope_id IS ?",
+        "SELECT settings FROM vinyl_overrides WHERE scope=? AND scope_id IS ? "
+        "ORDER BY rowid DESC LIMIT 1",
         (scope, scope_id)).fetchone()
     return json.loads(row["settings"]) if row else None
 
 
 def set_vinyl_override(con, scope, scope_id, settings_dict):
+    # Delete-then-insert rather than ON CONFLICT: the global scope stores
+    # scope_id NULL, and SQLite counts NULLs as distinct in a UNIQUE/PK index, so
+    # ON CONFLICT(scope, scope_id) never matched an existing global row. Every
+    # save appended instead of replacing, and the global vinyl look was stuck on
+    # whatever was chosen first. `IS` matches NULL, so one path covers both.
+    # Both statements share the implicit transaction closed by commit().
+    con.execute("DELETE FROM vinyl_overrides WHERE scope=? AND scope_id IS ?",
+                (scope, scope_id))
     con.execute(
-        "INSERT INTO vinyl_overrides(scope, scope_id, settings) VALUES (?,?,?) "
-        "ON CONFLICT(scope, scope_id) DO UPDATE SET settings=excluded.settings",
+        "INSERT INTO vinyl_overrides(scope, scope_id, settings) VALUES (?,?,?)",
         (scope, scope_id, json.dumps(settings_dict)))
     con.commit()
 
