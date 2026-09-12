@@ -3,8 +3,8 @@ import re
 import glob
 from dataclasses import dataclass, field
 
+from lpcore.tracks import AUDIO_EXTENSIONS, album_track_names, is_audio  # noqa: F401
 
-AUDIO_EXTENSIONS = ('.mp3', '.flac')
 COVER_PATTERNS = ['cover.[jp][np]g', 'Cover.[jp][np]g', 'folder.[jp][np]g', 'Folder.[jp][np]g']
 YEAR_RE = re.compile(r'^(\d{4})\s*[-–—]\s*(.+)$')
 
@@ -57,10 +57,7 @@ class Library:
                 if not os.path.isdir(album_path):
                     continue
 
-                track_count = sum(
-                    1 for f in os.listdir(album_path)
-                    if f.lower().endswith(AUDIO_EXTENSIONS)
-                )
+                track_count = sum(1 for f in os.listdir(album_path) if is_audio(f))
                 if track_count == 0:
                     continue
 
@@ -116,9 +113,4 @@ class Library:
         return self.albums_by_path.get(path)
 
     def get_album_tracks(self, album_path):
-        if not os.path.isdir(album_path):
-            return []
-        return sorted(
-            f for f in os.listdir(album_path)
-            if f.lower().endswith(AUDIO_EXTENSIONS)
-        )
+        return album_track_names(album_path)

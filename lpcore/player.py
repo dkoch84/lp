@@ -8,9 +8,8 @@ from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
+from lpcore.tracks import AUDIO_EXTENSIONS, album_track_paths  # noqa: F401
 
-AUDIO_EXTENSIONS = ('.mp3', '.flac', '.m4a', '.aac', '.ogg', '.oga',
-                    '.opus', '.wav', '.wma', '.aiff', '.aif')
 log = logging.getLogger("lp.player")
 
 
@@ -142,11 +141,7 @@ class PlayerBackend:
                 print(f"Callback error ({event}): {e}")
 
     def play_album(self, album_path, start=0):
-        files = sorted(
-            os.path.join(album_path, f)
-            for f in os.listdir(album_path)
-            if f.lower().endswith(AUDIO_EXTENSIONS)
-        )
+        files = album_track_paths(album_path)
         if not files:
             print(f"No audio files in {album_path}")
             return
