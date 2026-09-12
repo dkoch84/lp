@@ -6,7 +6,9 @@ skipped when their mtime is unchanged, and rows are upserted (ids preserved, so
 playlist references survive a reindex). Designed to run on a background thread.
 """
 import os
+import time
 
+from mutagen import File as MutagenFile
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
@@ -22,8 +24,10 @@ def _int(v):
 
 
 def read_tags(path):
-    """(title, track_no, disc_no, duration) — title falls back to the filename."""
-    title = track = disc = None
+    """(title, track_no, disc_no, duration, genre) — title falls back to the
+    filename. Handles mp3/flac directly and everything else mutagen can read
+    (m4a, ogg/opus, wav, …) via the generic loader."""
+    title = track = disc = genre = None
     dur = 0.0
     try:
         low = path.lower()
@@ -37,14 +41,18 @@ def read_tags(path):
             except Exception:
                 a = {}
         else:
-            a = {}
+            mf = MutagenFile(path, easy=True)
+            a = mf or {}
+            if mf is not None and mf.info is not None:
+                dur = float(getattr(mf.info, 'length', 0.0) or 0.0)
         title = (a.get('title') or [None])[0]
         track = (a.get('tracknumber') or [None])[0]
         disc = (a.get('discnumber') or [None])[0]
+        genre = (a.get('genre') or [None])[0]
     except Exception:
         pass
     return (title or os.path.splitext(os.path.basename(path))[0],
-            _int(track), _int(disc), float(dur))
+            _int(track), _int(disc), float(dur), genre or '')
 
 
 def index_library(con, music_path, progress=None):
@@ -80,14 +88,18 @@ def index_library(con, music_path, progress=None):
                 n_trk += 1
                 if row and abs(row["mtime"] - mtime) < 1.0:
                     continue                      # unchanged — skip the tag read
-                title, trk, disc, dur = read_tags(path)
+                title, trk, disc, dur, genre = read_tags(path)
+                # added_at: first time we see the file (preserved on reindex)
+                added = mtime if not row else None
                 con.execute("INSERT OR IGNORE INTO tracks"
                             "(album_id, artist_id, title, track_no, disc_no, path, "
-                            " duration, mtime) VALUES (?,?,?,?,?,?,?,?)",
-                            (album_id, artist_id, title, trk, disc, path, dur, mtime))
+                            " duration, mtime, genre, added_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (album_id, artist_id, title, trk, disc, path, dur,
+                             mtime, genre, added or time.time()))
                 con.execute("UPDATE tracks SET title=?, track_no=?, disc_no=?, "
-                            "duration=?, mtime=? WHERE path=?",
-                            (title, trk, disc, dur, mtime, path))
+                            "duration=?, mtime=?, genre=? WHERE path=?",
+                            (title, trk, disc, dur, mtime, genre, path))
             con.commit()
             if progress:
                 progress(n_art, n_alb, n_trk)

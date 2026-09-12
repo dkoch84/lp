@@ -3,6 +3,7 @@
 Wires SQLite + lpcore + the Qt window. Config (music path, lastfm) is read from
 the same config.yml the kiosk uses, by default.
 """
+import json
 import os
 import sys
 import threading
@@ -11,12 +12,29 @@ import yaml
 
 from lpcore.player import PlayerBackend
 from lpcore.scrobbler import Scrobbler
-from . import db, indexer
+from . import db, indexer, mpris
 from .player import QueuePlayer
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(
     os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "lp-deck")
+STATE_PATH = os.path.join(DATA_DIR, "session.json")
+
+
+def _restore_session(player):
+    """Reload the last session's queue, paused where we left off."""
+    try:
+        with open(STATE_PATH) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return
+    if st.get("repeat"):
+        player.set_repeat(st["repeat"])
+    player.shuffle = bool(st.get("shuffle"))
+    queue = st.get("queue") or []
+    if queue:
+        player.restore_queue(queue, st.get("index", 0),
+                             st.get("offset", 0.0), st.get("album_path"))
 
 
 def _load_config():
@@ -28,36 +46,43 @@ def _load_config():
 
 
 def main():
-    from PySide6.QtWidgets import QApplication
-    from .app import MainWindow
-    from . import theme
+    from . import qmlapp
 
     config = _load_config()
     music_path = config.get("music_library_path", "/mnt/share/media/Music")
     db_path = os.path.join(DATA_DIR, "library.db")
     con = db.connect(db_path)
 
-    backend = PlayerBackend(audio_output=config.get("audio_output", "alsa"))
+    # ReplayGain mode is instance-level in libVLC, so it must be set before the
+    # backend is built. Read the persisted UI choice directly (QSettings works
+    # with an explicit org/app pair, no QApplication needed yet).
+    from PySide6.QtCore import QSettings
+    rg = str(QSettings("lp-deck", "lp-deck").value("replaygainMode", "none"))
+    backend = PlayerBackend(audio_output=config.get("audio_output", "alsa"),
+                            replaygain=rg)
     scrobbler = Scrobbler(backend, config.get("lastfm", {}))   # req #9
     player = QueuePlayer(backend, scrobbler)
 
-    app = QApplication(sys.argv)
-    theme.apply(app)            # minimalist polish over the inherited qt6ct/Plasma theme
-    win = MainWindow(con, player)
-    win.show()
-
     # Index the library in the background (own connection — sqlite isn't shared
-    # across threads), then refresh the view via the queued signal.
-    def reindex():
-        c = db.connect(db_path)
-        indexer.index_library(c, music_path)
-        c.close()
-        win.library_indexed.emit()
-    threading.Thread(target=reindex, daemon=True).start()
+    # across threads), then refresh the artist model via the queued signal.
+    mpris_handle = mpris.start_mpris(player)   # media keys / desktop controls
+
+    def on_ready(controller):
+        _restore_session(player)               # resume last session (paused)
+
+        def reindex():
+            c = db.connect(db_path)
+            indexer.index_library(c, music_path)
+            c.close()
+            controller.libraryChanged.emit()
+        threading.Thread(target=reindex, daemon=True).start()
 
     try:
-        sys.exit(app.exec())
+        sys.exit(qmlapp.run(con, player, db_path, on_ready=on_ready))
     finally:
+        player.save_state(STATE_PATH)
+        if mpris_handle:
+            mpris_handle.stop()
         player.shutdown()
 
 

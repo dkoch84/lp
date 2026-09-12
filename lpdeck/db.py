@@ -63,10 +63,38 @@ CREATE TABLE IF NOT EXISTS vinyl_overrides (
     PRIMARY KEY (scope, scope_id)
 );
 
+-- Play history: one row per track play (for "recently played" + stats).
+CREATE TABLE IF NOT EXISTS play_history (
+    id        INTEGER PRIMARY KEY,
+    track_id  INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    played_at REAL NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_album  ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
+CREATE INDEX IF NOT EXISTS idx_history_track ON play_history(track_id);
+CREATE INDEX IF NOT EXISTS idx_history_time  ON play_history(played_at);
 """
+
+# Columns added after the initial schema shipped — applied idempotently to
+# existing databases (CREATE TABLE IF NOT EXISTS won't add columns).
+_MIGRATIONS = [
+    ("tracks", "favorite",    "INTEGER NOT NULL DEFAULT 0"),
+    ("tracks", "rating",      "INTEGER NOT NULL DEFAULT 0"),
+    ("tracks", "play_count",  "INTEGER NOT NULL DEFAULT 0"),
+    ("tracks", "last_played", "REAL NOT NULL DEFAULT 0"),
+    ("tracks", "genre",       "TEXT NOT NULL DEFAULT ''"),
+    ("tracks", "added_at",    "REAL NOT NULL DEFAULT 0"),
+]
+
+
+def _migrate(con):
+    for table, col, decl in _MIGRATIONS:
+        cols = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+        if col not in cols:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    con.commit()
 
 
 def connect(db_path):
@@ -75,6 +103,7 @@ def connect(db_path):
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(SCHEMA)
+    _migrate(con)
     return con
 
 
@@ -101,8 +130,8 @@ def clear_vinyl_override(con, scope, scope_id):
     con.commit()
 
 
-def resolve_vinyl_settings(con, album_id=None, artist_id=None):
-    """Most-specific override wins: album → artist → global → {} (renderer default)."""
+def resolve_vinyl_settings(con, album_id=None, artist_id=None, playlist_id=None):
+    """Most-specific override wins: album → artist → playlist → global → {}."""
     if album_id is not None:
         ov = get_vinyl_override(con, 'album', album_id)
         if ov:
@@ -111,7 +140,36 @@ def resolve_vinyl_settings(con, album_id=None, artist_id=None):
         ov = get_vinyl_override(con, 'artist', artist_id)
         if ov:
             return ov
+    if playlist_id is not None:
+        ov = get_vinyl_override(con, 'playlist', playlist_id)
+        if ov:
+            return ov
     return get_vinyl_override(con, 'global', None) or {}
+
+
+# --- library reads ---
+
+def artist_cover_paths(con, artist_id, limit=4):
+    """Up to `limit` cover paths for one artist (oldest first) — the per-tile
+    query used by the QML image provider."""
+    return [r["cover_path"] for r in con.execute(
+        "SELECT cover_path FROM albums WHERE artist_id=? "
+        "AND cover_path IS NOT NULL AND cover_path <> '' "
+        "ORDER BY year, name LIMIT ?", (artist_id, limit))]
+
+
+def artist_covers(con, limit=4):
+    """{artist_id: [cover_path, …]} — up to `limit` covers per artist, oldest
+    first, for the artist-tile mosaics. Skips artists/albums with no art."""
+    out = {}
+    for r in con.execute(
+            "SELECT artist_id, cover_path FROM albums "
+            "WHERE cover_path IS NOT NULL AND cover_path <> '' "
+            "ORDER BY artist_id, year, name"):
+        lst = out.setdefault(r["artist_id"], [])
+        if len(lst) < limit:
+            lst.append(r["cover_path"])
+    return out
 
 
 # --- playlists (req #1 Playlists, #3 queue source) ---
@@ -135,3 +193,91 @@ def append_to_playlist(con, playlist_id, track_id):
     con.execute("INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES (?,?,?)",
                 (playlist_id, track_id, n))
     con.commit()
+
+
+def rename_playlist(con, playlist_id, name):
+    con.execute("UPDATE playlists SET name=? WHERE id=?", (name, playlist_id))
+    con.commit()
+
+
+def delete_playlist(con, playlist_id):
+    con.execute("DELETE FROM playlists WHERE id=?", (playlist_id,))
+    con.commit()
+
+
+def remove_playlist_position(con, playlist_id, position):
+    """Remove the track at `position`, then compact the remaining positions so
+    they stay contiguous (the PK is (playlist_id, position))."""
+    ids = playlist_track_ids(con, playlist_id)
+    if not (0 <= position < len(ids)):
+        return
+    del ids[position]
+    con.execute("DELETE FROM playlist_tracks WHERE playlist_id=?", (playlist_id,))
+    for pos, tid in enumerate(ids):
+        con.execute("INSERT INTO playlist_tracks(playlist_id, track_id, position) "
+                    "VALUES (?,?,?)", (playlist_id, tid, pos))
+    con.commit()
+
+
+# --- favorites / ratings ---
+
+def set_favorite(con, track_id, fav):
+    con.execute("UPDATE tracks SET favorite=? WHERE id=?", (1 if fav else 0, track_id))
+    con.commit()
+
+
+def set_rating(con, track_id, rating):
+    con.execute("UPDATE tracks SET rating=? WHERE id=?",
+                (max(0, min(5, int(rating))), track_id))
+    con.commit()
+
+
+def track_id_for_path(con, path):
+    row = con.execute("SELECT id FROM tracks WHERE path=?", (path,)).fetchone()
+    return row["id"] if row else None
+
+
+# --- play stats / history ---
+
+def record_play(con, track_id, when):
+    con.execute("UPDATE tracks SET play_count=play_count+1, last_played=? WHERE id=?",
+                (when, track_id))
+    con.execute("INSERT INTO play_history(track_id, played_at) VALUES (?,?)",
+                (track_id, when))
+    con.commit()
+
+
+def _track_rows(con, where, params, order, limit):
+    return [dict(r) for r in con.execute(
+        "SELECT t.id, t.title, t.duration, t.path, t.favorite, t.rating, "
+        "t.play_count, t.album_id, al.path AS album_path, al.name AS album_name, "
+        "t.artist_id, ar.name AS artist "
+        "FROM tracks t JOIN albums al ON al.id=t.album_id "
+        "JOIN artists ar ON ar.id=t.artist_id "
+        f"WHERE {where} ORDER BY {order} LIMIT ?", (*params, limit))]
+
+
+def recently_played(con, limit=100):
+    return _track_rows(con, "t.last_played > 0", (), "t.last_played DESC", limit)
+
+
+def most_played(con, limit=100):
+    return _track_rows(con, "t.play_count > 0", (), "t.play_count DESC, t.last_played DESC", limit)
+
+
+def recently_added(con, limit=100):
+    return _track_rows(con, "t.added_at > 0", (), "t.added_at DESC", limit)
+
+
+def favorites(con, limit=1000):
+    return _track_rows(con, "t.favorite = 1", (), "ar.sort_name, al.year, t.track_no", limit)
+
+
+def genres(con):
+    return [r["genre"] for r in con.execute(
+        "SELECT DISTINCT genre FROM tracks WHERE genre <> '' ORDER BY genre")]
+
+
+def genre_tracks(con, genre, limit=1000):
+    return _track_rows(con, "t.genre = ?", (genre,),
+                       "ar.sort_name, al.year, t.track_no", limit)
