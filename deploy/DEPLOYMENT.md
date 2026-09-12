@@ -95,7 +95,7 @@ to `http://<host>:<port>`.
 Needs Qt on top of the same checkout:
 
 ```bash
-venv/bin/pip install PySide6
+venv/bin/pip install -r requirements-deck.txt
 venv/bin/python -m lpdeck
 ```
 
@@ -103,5 +103,6 @@ venv/bin/python -m lpdeck
 
 ```bash
 cd ~/lp && git pull && venv/bin/pip install -r requirements.txt
+# add -r requirements-deck.txt only on a machine running lp-deck/lp-studio
 sudo systemctl restart lp        # if running as a service
 ```

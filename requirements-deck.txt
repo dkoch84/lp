@@ -1,0 +1,7 @@
+# lp-deck + lp-studio, on top of requirements.txt.
+#   pip install -r requirements.txt -r requirements-deck.txt
+PySide6>=6.11
+
+# MPRIS2 / media keys for lp-deck. Optional at runtime: start_mpris() returns
+# None when it or the session bus is missing, and the player carries on.
+dbus-next

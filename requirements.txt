@@ -1,4 +1,7 @@
-# lpcore + lp (kiosk / web UI)
+# lpcore + lp (the kiosk / web UI). This file is what a kiosk install needs and
+# nothing more: lpcore and lp never import Qt, and an ODROID/Pi should not be
+# made to build PySide6 to play records. The desktop apps add their own deps in
+# requirements-deck.txt.
 python-vlc
 pyyaml
 mutagen
@@ -7,9 +10,3 @@ uvicorn[standard]
 pygame-ce
 numpy
 pylast
-
-# lp-deck + lp-studio (desktop Qt apps); lpcore and lp never import Qt
-PySide6>=6.11
-
-# lp-deck: MPRIS2 / media keys (optional at runtime, degrades to a no-op)
-dbus-next
