@@ -183,6 +183,63 @@ def _clouds_palette(cloud, sky):
 
     return fn
 
+# Modulator fields a parameterized nebula channel can ride on. Each maps the
+# renderer's noise fields (t1/t2/t3, hue-shift hs) — plus two derived forms — to
+# a [0,1]-ish array. 'sin' is the shimmering banded modulator (0.5+0.5·sin).
+NEBULA_MODS = ('t1', 't2', 't3', 'hs', 'inv_t3', 'sin')
+
+
+def _nebula_mod(name, t1, t2, t3, hs, sin_freq):
+    if name == 't2':
+        return t2
+    if name == 't3':
+        return t3
+    if name == 'hs':
+        return hs
+    if name == 'inv_t3':
+        return 1.0 - t3
+    if name == 'sin':
+        return 0.5 + 0.5 * np.sin(t1 * sin_freq)
+    return t1
+
+
+def _nebula_palette(col1, col2, amp1, amp2,
+                    mods1=('t1', 'hs', 'sin'), mods2=('t3', 't1', 'inv_t3'),
+                    sin_freq=8.0, bright='std', sparkle='none'):
+    """Build a nebula palette function from numeric params — the generic form of
+    the hand-written ``_nebula_*`` palettes (same template as ``_clouds_palette``
+    is for clouds). Two colours (``col1``/``col2`` = per-channel base, ``amp1``/
+    ``amp2`` = per-channel modulation depth) blended by ``blend``; each channel
+    rides one of NEBULA_MODS. ``bright`` ∈ {std, galaxy (br²), pastel (0.4+0.6·br)};
+    ``sparkle`` ∈ {none, stars, pop} adds the galaxy/oil-spill highlight term.
+    """
+    c1, c2 = [float(x) for x in col1], [float(x) for x in col2]
+    a1, a2 = [float(x) for x in amp1], [float(x) for x in amp2]
+
+    def fn(br, blend, t1, t2, t3, hs):
+        if bright == 'galaxy':
+            b = br * br
+        elif bright == 'pastel':
+            b = 0.4 + 0.6 * br
+        else:
+            b = br
+        f1 = [_nebula_mod(m, t1, t2, t3, hs, sin_freq) for m in mods1]
+        f2 = [_nebula_mod(m, t1, t2, t3, hs, sin_freq) for m in mods2]
+        ch1 = [b * (c1[i] + a1[i] * f1[i]) for i in range(3)]
+        ch2 = [b * (c2[i] + a2[i] * f2[i]) for i in range(3)]
+        r = ch1[0] * blend + ch2[0] * (1 - blend)
+        g = ch1[1] * blend + ch2[1] * (1 - blend)
+        bl = ch1[2] * blend + ch2[2] * (1 - blend)
+        if sparkle == 'stars':
+            s = np.maximum(0, t1 * t2 * 4 - 1.2) ** 2
+            r, g, bl = r + s * 200, g + s * 180, bl + s * 255
+        elif sparkle == 'pop':
+            pop = np.maximum(0, t1 * t2 * 3 - 0.9)
+            r, g, bl = r + pop * 80, g + pop * 100, bl + pop * 90
+        return (r, g, bl)
+
+    return fn
+
 def _nebula_marble(br, blend, t1, t2, t3, hs):
     base = 0.35 + 0.65 * br
     r1 = base * (230 + 25 * hs)

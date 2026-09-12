@@ -11,6 +11,7 @@ lint:                     ## static checks: undefined names, dead imports
 test:                     ## render smoke + settings + state tests (headless)
 	$(PY) tests/test_render.py
 	$(PY) tests/test_state.py
+	$(PY) tests/test_lyrics.py
 
 fix:                      ## auto-fix what ruff can
 	ruff check --select F --fix $(SRC)

@@ -84,6 +84,7 @@ VINYL_COLORS = {
     'lavender':     (180, 120, 220),
     'midnight':     (75, 60, 210),
     'cyan':         (11, 187, 208),
+    'sea-foam':     (124, 147, 133),
 }
 
 # Per-variant groove + track-mark appearance — (groove_rgba, track_rgba).
@@ -104,6 +105,7 @@ VINYL_GROOVE_COLORS = {
     'copper':     ((0, 0, 0, 9),        (0, 0, 0, 36)),
     'rust':       ((0, 0, 0, 10),       (0, 0, 0, 40)),
     'cyan':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
+    'sea-foam':   ((0, 0, 0, 8),        (0, 0, 0, 32)),   # mid-light body — subtle shadow grooves
     # Dark bodies — light additive shine
     'red':        ((255, 255, 255, 35), (255, 255, 255, 45)),
     'navy':       ((255, 255, 255, 35), (255, 255, 255, 45)),
