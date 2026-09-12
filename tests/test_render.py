@@ -34,7 +34,7 @@ DUR = 260.0
 SIZE = 96                           # int, as real callers pass (record_size * SS)
 
 _M = MANDELBROT_VARIANTS
-_MAND = ['mandelbrot-%s-%s' % (v[4], v[5]) for v in _M]
+_MAND = [f'mandelbrot-{v[4]}-{v[5]}' for v in _M]
 _NEB = ['nebula-' + v[2] for v in NEBULA_VARIANTS]
 _MUN = ['munafo-' + v[0] for v in MUNAFO_VARIANTS]
 

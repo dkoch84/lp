@@ -214,7 +214,7 @@ class VinylRenderer:
         else:
             a = math.pi / 2 + total_ang / 2.0     # start left of bottom center
             step = -1.0
-        for (ch, g), w in zip(glyphs, widths):
+        for (_ch, g), w in zip(glyphs, widths):
             char_ang = w / float(radius)
             ca = a + step * char_ang / 2.0
             px = cx + radius * math.cos(ca)

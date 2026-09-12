@@ -19,5 +19,6 @@ lpcore/cache/
 image.png
 image-*.png
 .ruff_cache/
+.pytest_cache/
 # lp-studio local template saves (user-generated; not shared yet)
 lpstudio/templates/

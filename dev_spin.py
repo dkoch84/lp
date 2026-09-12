@@ -50,7 +50,7 @@ WEB_PORT = 8000
 def build_style_list():
     styles = ['black', 'clear', 'picture']
     styles += ['color-' + c for c in VINYL_COLORS]
-    styles += ['mandelbrot-%s-%s' % (v[4], v[5]) for v in MANDELBROT_VARIANTS]
+    styles += [f'mandelbrot-{v[4]}-{v[5]}' for v in MANDELBROT_VARIANTS]
     styles += ['nebula-' + v[2] for v in NEBULA_VARIANTS]
     styles += ['munafo-' + v[0] for v in MUNAFO_VARIANTS]
     styles += ['pattern-mandelbrot', 'pattern-nebula', 'pattern-munafo']

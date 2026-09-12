@@ -4,18 +4,16 @@ SRC := lpcore lp lpdeck lpstudio main.py dev_spin.py gen_release_icon.py tests
 
 .PHONY: help check lint test fix run deck shot gammaray studio
 
-check: lint test          ## lint + smoke test (run before pushing)
+check: lint test          ## lint + tests (run before pushing)
 
-lint:                     ## static checks: undefined names, dead imports
-	$(RUFF) check --select F $(SRC)
+lint:                     ## ruff (rules + rationale live in ruff.toml)
+	$(RUFF) check $(SRC)
 
-test:                     ## render smoke + settings + state tests (headless)
-	$(PY) tests/test_render.py
-	$(PY) tests/test_state.py
-	$(PY) tests/test_lyrics.py
+test:                     ## run the test suite (headless)
+	$(PY) -m pytest tests/ -q
 
 fix:                      ## auto-fix what ruff can
-	$(RUFF) check --select F --fix $(SRC)
+	$(RUFF) check --fix $(SRC)
 
 run:                      ## launch the app
 	$(PY) main.py

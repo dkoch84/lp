@@ -424,7 +424,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
                 decor2=req.decor2, decor2_color=req.decor2_color,
             )
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
         return _label_text_state()
 
     @app.get("/api/settings/label-text/options")
@@ -453,7 +453,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
         try:
             settings.update(brightness=req.brightness)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
         return {"brightness": settings.brightness}
 
     # --- Library management ---

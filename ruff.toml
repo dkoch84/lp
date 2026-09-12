@@ -1,0 +1,38 @@
+# Lint configuration for lp. `make lint` runs this; `make fix` applies whatever
+# is auto-fixable. Keep the Makefile free of --select so this file is the single
+# source of truth (a --select on the command line overrides everything here).
+
+target-version = "py39"
+line-length = 100
+
+[lint]
+# F   pyflakes: undefined names, unused imports. The original set, and the one
+#     that actually catches broken code.
+# E9  syntax / IO errors severe enough that the file does not parse.
+# B   bugbear: real bug shapes (mutable defaults, raise-without-from, ...).
+# C4  dict()/list()/tuple() calls that should be literals.
+# UP  syntax obsolete for the Python floor above.
+select = ["F", "E9", "B", "C4", "UP"]
+
+# Deliberately NOT selected, with reasons, so this is a decision rather than an
+# oversight:
+#
+#   E501 (line length). 122 offenders at the default 88 columns, still 22 at
+#        110. None are bugs; enabling it buys a reformatting pass, not a fix.
+#        line-length above is set so a future pass has a target to aim at.
+#   B905 (zip without explicit strict=). The five call sites pair sequences that
+#        are equal by construction. strict=True would turn a length mismatch
+#        into a runtime exception mid-render on the kiosk, and strict=False is
+#        just the warning silenced. Revisit deliberately, not as lint cleanup.
+#   C408 (dict() call instead of a literal). The offenders are the renderer's
+#        aligned tuning tables (`_SHINE_PARAMS = dict(streak_x_frac = -0.05, ...`
+#        with a trailing comment per knob) and kwargs-shaped test data. Quoting
+#        those keys makes them harder to read, not easier. The rest of C4 still
+#        applies.
+ignore = ["B905", "C408"]
+
+[lint.flake8-bugbear]
+# `def rowCount(self, parent=QModelIndex())` is the documented PySide idiom for
+# QAbstractItemModel overrides, and Qt calls these from C++ with a real index.
+# B008 is a false positive there.
+extend-immutable-calls = ["PySide6.QtCore.QModelIndex"]

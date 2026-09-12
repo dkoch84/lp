@@ -159,7 +159,7 @@ def start_mpris(player):
             if not cur:
                 return {}
 
-            trackid = "/org/mpris/MediaPlayer2/lpdeck/track/%d" % self._trackid_counter
+            trackid = f"/org/mpris/MediaPlayer2/lpdeck/track/{self._trackid_counter:d}"
             meta = {"mpris:trackid": Variant("o", trackid)}
 
             title = cur.get("title")
