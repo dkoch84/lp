@@ -21,6 +21,36 @@ ACCENT = (200, 200, 200)
 NEEDLE_COLOR = (200, 200, 200)
 
 
+def fit_text(font, text, max_w):
+    """`text`, tail-ellipsized until it renders within `max_w` px.
+
+    Song titles are the one metadata field here that regularly outruns the
+    panel, and the kiosk is read from across a room, so a title that slides off
+    the edge is worse than one that visibly stops. Binary search rather than a
+    character-at-a-time walk: proportional fonts make width non-linear in
+    length, but it is monotonic, which is all bisection needs.
+    """
+    if not text:
+        return text
+    if max_w <= 0:
+        return ''
+    if font.size(text)[0] <= max_w:
+        return text
+
+    ellipsis = '…'
+    if font.size(ellipsis)[0] > max_w:
+        return ''
+
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if font.size(text[:mid] + ellipsis)[0] <= max_w:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo].rstrip() + ellipsis
+
+
 
 
 
@@ -455,9 +485,30 @@ class Display:
         # Year
         date = status.get('date') or ''
         year = date[:4] if len(date) >= 4 else date
+        track_title = status.get('track_title')
         if year:
             tex, rect = self._text_tex('year', self._font_medium, year, DIM_TEXT)
             tex.draw(dstrect=pygame.Rect(x, y, rect.w, rect.h))
+            # Tight gap when the track line follows, so year and track read as
+            # one block under the album rather than as two loose lines.
+            y += rect.h + int(self.height * (0.008 if track_title else 0.02))
+
+        # Track: dim "n/total", then the title. This is the only line up here
+        # that changes mid-album, and the number doubles as a position readout
+        # (the needle shows where in the SIDE you are, not which track).
+        if track_title:
+            tx = x
+            number, total = status.get('track_number') or 0, status.get('total_tracks') or 0
+            if number and total:
+                tex, rect = self._text_tex('track_no', self._font_medium,
+                                           f'{number}/{total}', DIM_TEXT)
+                tex.draw(dstrect=pygame.Rect(tx, y, rect.w, rect.h))
+                tx += rect.w + int(meta_width * 0.035)
+
+            title = fit_text(self._font_medium, track_title,
+                             (meta_x + meta_width - pad) - tx)
+            tex, rect = self._text_tex('track_title', self._font_medium, title, TEXT_COLOR)
+            tex.draw(dstrect=pygame.Rect(tx, y, rect.w, rect.h))
             y += rect.h + int(self.height * 0.02)
 
         # Spinning record — size to fit remaining space
