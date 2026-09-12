@@ -18,3 +18,5 @@ lpcore/cache/
 .lp_launch.json
 image.png
 .ruff_cache/
+# lp-studio local template saves (user-generated; not shared yet)
+lpstudio/templates/
