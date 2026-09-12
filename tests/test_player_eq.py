@@ -22,6 +22,11 @@ changes the behaviour the canaries fail and the workaround can be revisited.
 They never CALL a method on a bogus-pointer object; doing so would take the test
 run down with a SIGSEGV. Only the wrapped address is inspected.
 
+python-vlc is pure Python and imports fine with no libVLC installed, binding
+nothing: every libvlc_* name then raises NameError on first use. The tests that
+call into libVLC are skipped there. The two canaries are not, because the bug
+they guard is in python-vlc's own constructor and needs no library at all.
+
 No PlayerBackend is instantiated here: that would build a libVLC instance and
 open an audio device. eq_bands() is a staticmethod, so it needs no player.
 
@@ -39,8 +44,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lpcore.player import PlayerBackend
 
 
+def _has_libvlc():
+    try:
+        vlc.libvlc_get_version()
+        return True
+    except Exception:
+        return False
+
+
+needs_libvlc = pytest.mark.skipif(
+    not _has_libvlc(),
+    reason="no libVLC on this host; python-vlc binds no libvlc_* functions")
+
+
 # --- what we rely on ------------------------------------------------------
 
+@needs_libvlc
 def test_eq_bands_reports_libvlcs_band_centres():
     bands = PlayerBackend.eq_bands()
     assert len(bands) == 10, f"libVLC changed its band count: {bands}"
@@ -48,6 +67,7 @@ def test_eq_bands_reports_libvlcs_band_centres():
     assert all(b > 0 for b in bands)
 
 
+@needs_libvlc
 def test_empty_equalizer_ctor_is_usable():
     """The path set_equalizer actually takes."""
     eq = vlc.AudioEqualizer()
@@ -58,6 +78,7 @@ def test_empty_equalizer_ctor_is_usable():
     assert eq.get_amp_at_index(0) == pytest.approx(2.0)
 
 
+@needs_libvlc
 def test_module_level_new_from_preset_is_the_working_preset_api():
     """The correct route, if the app ever wants libVLC's own curves instead of
     its hand-rolled ones."""
@@ -90,6 +111,7 @@ def test_canary_preset_ctor_still_wraps_the_int_as_a_raw_pointer():
     )
 
 
+@needs_libvlc
 def test_canary_preset_ctor_is_not_equivalent_to_new_from_preset():
     """The whole point: the class ctor and the module function disagree, and
     only the module function is real."""
