@@ -64,13 +64,20 @@ const shareModalClose = $('#share-modal-close');
 const shareModalBackdrop = $('#share-modal-backdrop');
 let shareModalUrl = null;
 
-function closeShareModal() {
+function hideShareModal() {
   shareModal.classList.add('hidden');
   if (shareModalUrl) {
     URL.revokeObjectURL(shareModalUrl);
     shareModalUrl = null;
   }
   shareModalImg.removeAttribute('src');
+}
+
+// Dismissing goes back, the same as the track picker, so its history entry is
+// consumed and the next back press does not reopen it.
+function closeShareModal() {
+  if (currentState().share) history.back();
+  else hideShareModal();
 }
 
 shareBtn.addEventListener('click', async () => {
@@ -87,7 +94,7 @@ shareBtn.addEventListener('click', async () => {
     shareModalImg.src = shareModalUrl;
     shareModalDownload.href = shareModalUrl;
     shareModalDownload.download = name;
-    shareModal.classList.remove('hidden');
+    navigate({...currentState(), share: true});
   } catch (e) {
     alert('Share failed: ' + e.message);
   } finally {
@@ -535,11 +542,20 @@ async function loadVersion() {
 
 function routeState() {
   const p = new URLSearchParams(location.search);
-  return {artist: p.get('artist') || null, tracks: p.get('tracks') || null};
+  return {artist: p.get('artist') || null, tracks: p.get('tracks') || null,
+          share: false};
+}
+
+// The state actually in effect. `share` is carried in the history entry but
+// deliberately NOT in the URL: the screenshot is the result of an action, and a
+// URL saying "share" would take a fresh one on every reload. So it survives
+// back and forward within a session and dies on reload, which is right.
+function currentState() {
+  return history.state || routeState();
 }
 
 function routeUrl(state) {
-  const p = new URLSearchParams();
+  const p = new URLSearchParams();      // note: `share` is intentionally absent
   if (state.artist) p.set('artist', state.artist);
   if (state.tracks) p.set('tracks', state.tracks);
   const q = p.toString();
@@ -568,6 +584,11 @@ async function applyRoute(state) {
   } else {
     hideTrackSheet();
   }
+
+  // Only re-show if the image is still in hand. Going back revokes the blob, so
+  // a forward press afterwards has nothing to show and should stay closed.
+  if (state.share && shareModalUrl) shareModal.classList.remove('hidden');
+  else hideShareModal();
 }
 
 function navigate(state, {replace = false} = {}) {

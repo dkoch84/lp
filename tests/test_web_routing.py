@@ -79,6 +79,17 @@ class _Library:
         return list(TRACKS)
 
 
+# Smallest valid PNG: 1x1, fully transparent.
+_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082")
+
+
+class _Display:
+    def request_screenshot(self, timeout=8.0):
+        return _PNG
+
+
 class _Player:
     def __init__(self):
         self.calls = []
@@ -110,7 +121,7 @@ def browser_ctx(chromium):
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
     port = _free_port()
     server = uvicorn.Server(uvicorn.Config(
-        create_app(player, _Library(), static_dir),
+        create_app(player, _Library(), static_dir, display=_Display()),
         host="127.0.0.1", port=port, log_level="error"))
     threading.Thread(target=server.run, daemon=True).start()
 
@@ -133,6 +144,7 @@ def page(browser_ctx):
     ctx = browser.new_context(viewport={"width": 420, "height": 860},
                               is_mobile=True, has_touch=True)
     pg = ctx.new_page()
+    pg.on("dialog", lambda d: d.dismiss())   # an alert() would hang the run
     pg.base = base
     pg.player = player
     yield pg
@@ -348,3 +360,77 @@ def test_history_does_not_grow_an_entry_per_render(page):
     page.go_back()
     page.wait_for_timeout(400)
     assert _artists_visible(page), "took more than two backs to reach the grid"
+
+
+# --- the share modal is history-aware without being in the URL -------------
+
+def _share_open(page):
+    return page.locator("#share-modal:not(.hidden)").count() > 0
+
+
+def _open_share(page):
+    page.locator("#share-btn").click()
+    page.wait_for_selector("#share-modal:not(.hidden)", timeout=10000)
+
+
+def test_share_modal_opens(page):
+    _open(page)
+    _open_share(page)
+    assert _share_open(page)
+
+
+def test_share_modal_does_not_touch_the_url(page):
+    """A URL saying "share" would take a fresh screenshot on every reload."""
+    _open(page)
+    _open_artist(page)
+    before = page.url
+    _open_share(page)
+    assert page.url == before
+
+
+def test_back_closes_the_share_modal(page):
+    """The ask: back should dismiss it, not navigate the page underneath."""
+    _open(page)
+    _open_artist(page)
+    _open_share(page)
+    page.go_back()
+    page.wait_for_timeout(400)
+    assert not _share_open(page)
+    assert _albums_visible(page), "back navigated instead of closing the modal"
+    assert _query(page) == {"artist": "Pallbearer"}
+
+
+def test_closing_the_share_modal_does_not_leave_it_in_history(page):
+    _open(page)
+    _open_artist(page)
+    _open_share(page)
+    page.locator("#share-modal-close").click()
+    page.wait_for_timeout(400)
+    assert not _share_open(page)
+
+    page.go_back()
+    page.wait_for_timeout(400)
+    assert not _share_open(page), "back reopened the share modal"
+    assert _artists_visible(page)
+
+
+def test_backdrop_dismisses_the_share_modal(page):
+    _open(page)
+    _open_share(page)
+    # A corner: the modal content sits over the middle of the backdrop.
+    page.locator("#share-modal-backdrop").click(position={"x": 5, "y": 5})
+    page.wait_for_timeout(400)
+    assert not _share_open(page)
+    assert _artists_visible(page)
+
+
+def test_forward_does_not_reopen_a_revoked_screenshot(page):
+    """Closing revokes the blob, so forward has nothing to show and must not
+    present an empty modal."""
+    _open(page)
+    _open_share(page)
+    page.go_back()
+    page.wait_for_timeout(300)
+    page.go_forward()
+    page.wait_for_timeout(400)
+    assert not _share_open(page)
