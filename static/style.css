@@ -339,29 +339,15 @@ main {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   position: relative;
-  /* A press held on a tile must not start a text selection or an image drag,
-     and must not raise the iOS touch callout. Vertical panning still works, so
-     the grid scrolls normally. */
   user-select: none;
   -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  touch-action: pan-y;
 }
 
-/* The hold gesture has to survive the browser's own long-press handling. A long
-   press whose target is an <img> raises the image context menu (Chrome/Android)
-   or the share sheet (iOS Safari), and the browser then claims the gesture and
-   fires pointercancel, killing the hold timer before it ever completes.
-   -webkit-touch-callout alone does not stop it: Chrome does not implement it.
-   Making every child transparent to pointer events puts the tile itself on the
-   receiving end, so there is no image under the finger to long-press. Nothing
-   inside a tile has its own handler, so nothing is lost. */
-.album-tile > * {
-  pointer-events: none;
-}
-
-.album-tile img {
-  -webkit-user-drag: none;
+/* The caption strip is its own tap target: the cover plays the album, this
+   opens the track picker. Padded so it is comfortably hittable with a thumb
+   without growing the tile. */
+.album-caption {
+  padding-bottom: 6px;
 }
 
 .album-tile:active {

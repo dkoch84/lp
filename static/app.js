@@ -153,14 +153,16 @@ function renderRecent() {
     tile.className = 'album-tile';
     tile.innerHTML = `
       ${a.has_cover
-        ? `<img class="album-cover" draggable="false" src="${coverUrl(a.artist, a.folder, 'thumb')}" alt="" loading="lazy">`
+        ? `<img class="album-cover" src="${coverUrl(a.artist, a.folder, 'thumb')}" alt="" loading="lazy">`
         : `<div class="album-cover-placeholder">&#9835;</div>`
       }
-      <div class="album-title">${esc(a.name)}</div>
-      <div class="album-year">${esc(a.artist)}</div>
+      <div class="album-caption">
+        <div class="album-title">${esc(a.name)}</div>
+        <div class="album-year">${esc(a.artist)}</div>
+      </div>
     `;
     tile.addEventListener('click', () => playAlbum(a.artist, a.folder));
-    attachHold(tile, () => openTrackSheet(a.artist, a.folder, a.name));
+    attachCaptionPicker(tile, () => openTrackSheet(a.artist, a.folder, a.name));
     recentGrid.appendChild(tile);
   }
   recentSection.classList.remove('hidden');
@@ -294,11 +296,13 @@ function renderAlbums() {
 
     tile.innerHTML = `
       ${a.has_cover
-        ? `<img class="album-cover" draggable="false" src="${coverUrl(currentArtist, a.folder, 'thumb')}" alt="" loading="lazy">`
+        ? `<img class="album-cover" src="${coverUrl(currentArtist, a.folder, 'thumb')}" alt="" loading="lazy">`
         : `<div class="album-cover-placeholder">&#9835;</div>`
       }
-      <div class="album-title">${esc(a.name)}</div>
-      ${a.year ? `<div class="album-year">${esc(a.year)}</div>` : ''}
+      <div class="album-caption">
+        <div class="album-title">${esc(a.name)}</div>
+        ${a.year ? `<div class="album-year">${esc(a.year)}</div>` : ''}
+      </div>
     `;
 
     if (gridMode) {
@@ -318,7 +322,7 @@ function renderAlbums() {
       // Albums with no cover art can't appear in the collage — not selectable.
     } else {
       tile.addEventListener('click', () => playAlbum(currentArtist, a.folder));
-      attachHold(tile, () => openTrackSheet(currentArtist, a.folder, a.name));
+      attachCaptionPicker(tile, () => openTrackSheet(currentArtist, a.folder, a.name));
     }
     albumGrid.appendChild(tile);
   }
@@ -377,71 +381,25 @@ async function playAlbum(artistName, folder, start = 0) {
 }
 
 // --- Track sheet ---
-// Hold an album tile to start it from a chosen track instead of from the top.
-// No affordance, by design: putting the record on is the point, and skipping
-// into the middle of one is a build/test escape hatch.
+// Tapping an album cover plays it from the top, as always. Tapping the caption
+// strip underneath opens this instead, to start from a chosen track. No
+// affordance, by design: putting the record on is the point, and skipping into
+// the middle of one is a build/test escape hatch.
+//
+// This began as a long press and that was abandoned. On Chrome/Android the
+// browser's own long-press wins the race and shows "copy image / save image",
+// and it fires pointercancel, so no amount of preventDefault reliably keeps a
+// timer-based hold alive. A plain click on a different element cannot be
+// intercepted by anything.
 
-const LONG_PRESS_MS = 600;
-const LONG_PRESS_SLOP = 10;   // px of finger drift still counted as a hold
-
-function attachHold(el, onHold) {
-  let timer = null, sx = 0, sy = 0, fired = false;
-
-  const cancel = () => {
-    if (timer !== null) { clearTimeout(timer); timer = null; }
-  };
-
-  el.addEventListener('pointerdown', (e) => {
-    if (e.button !== undefined && e.button !== 0) return;   // right-click is not a hold
-    fired = false;
-    sx = e.clientX; sy = e.clientY;
-    cancel();
-    timer = setTimeout(() => {
-      timer = null;
-      fired = true;
-      onHold();
-    }, LONG_PRESS_MS);
+function attachCaptionPicker(tile, onPick) {
+  const caption = tile.querySelector('.album-caption');
+  if (!caption) return;
+  caption.addEventListener('click', (e) => {
+    // The tile's own click plays the album; this must not also do that.
+    e.stopPropagation();
+    onPick();
   });
-
-  el.addEventListener('pointermove', (e) => {
-    if (timer === null) return;
-    if (Math.abs(e.clientX - sx) > LONG_PRESS_SLOP ||
-        Math.abs(e.clientY - sy) > LONG_PRESS_SLOP) cancel();   // a scroll, not a hold
-  });
-
-  for (const ev of ['pointercancel', 'pointerleave']) {
-    el.addEventListener(ev, cancel);
-  }
-
-  el.addEventListener('pointerup', () => {
-    cancel();
-    if (!fired) return;
-    // Lifting off ends the hold, and the browser then dispatches a click at
-    // that point — where the sheet now is. Left alone it lands on the backdrop
-    // and shuts the sheet the instant it appears, or worse, on a row, starting
-    // a track nobody chose. The tile-level guard below cannot catch it: the
-    // click is not aimed at the tile any more. Swallow exactly one click,
-    // anywhere, and give up waiting if none arrives.
-    const swallow = (e) => {
-      clearTimeout(giveUp);
-      e.stopPropagation();
-      e.preventDefault();
-    };
-    document.addEventListener('click', swallow, {capture: true, once: true});
-    const giveUp = setTimeout(
-      () => document.removeEventListener('click', swallow, {capture: true}), 700);
-  });
-
-  // The click that follows the release would otherwise also play from track 1.
-  el.addEventListener('click', (e) => {
-    if (!fired) return;
-    fired = false;
-    e.stopImmediatePropagation();
-    e.preventDefault();
-  }, true);
-
-  // Suppress the touch callout / context menu a long press raises on mobile.
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 function closeTrackSheet() {
