@@ -153,7 +153,7 @@ function renderRecent() {
     tile.className = 'album-tile';
     tile.innerHTML = `
       ${a.has_cover
-        ? `<img class="album-cover" src="${coverUrl(a.artist, a.folder, 'thumb')}" alt="" loading="lazy">`
+        ? `<img class="album-cover" draggable="false" src="${coverUrl(a.artist, a.folder, 'thumb')}" alt="" loading="lazy">`
         : `<div class="album-cover-placeholder">&#9835;</div>`
       }
       <div class="album-title">${esc(a.name)}</div>
@@ -294,7 +294,7 @@ function renderAlbums() {
 
     tile.innerHTML = `
       ${a.has_cover
-        ? `<img class="album-cover" src="${coverUrl(currentArtist, a.folder, 'thumb')}" alt="" loading="lazy">`
+        ? `<img class="album-cover" draggable="false" src="${coverUrl(currentArtist, a.folder, 'thumb')}" alt="" loading="lazy">`
         : `<div class="album-cover-placeholder">&#9835;</div>`
       }
       <div class="album-title">${esc(a.name)}</div>
@@ -409,9 +409,28 @@ function attachHold(el, onHold) {
         Math.abs(e.clientY - sy) > LONG_PRESS_SLOP) cancel();   // a scroll, not a hold
   });
 
-  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) {
+  for (const ev of ['pointercancel', 'pointerleave']) {
     el.addEventListener(ev, cancel);
   }
+
+  el.addEventListener('pointerup', () => {
+    cancel();
+    if (!fired) return;
+    // Lifting off ends the hold, and the browser then dispatches a click at
+    // that point — where the sheet now is. Left alone it lands on the backdrop
+    // and shuts the sheet the instant it appears, or worse, on a row, starting
+    // a track nobody chose. The tile-level guard below cannot catch it: the
+    // click is not aimed at the tile any more. Swallow exactly one click,
+    // anywhere, and give up waiting if none arrives.
+    const swallow = (e) => {
+      clearTimeout(giveUp);
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    document.addEventListener('click', swallow, {capture: true, once: true});
+    const giveUp = setTimeout(
+      () => document.removeEventListener('click', swallow, {capture: true}), 700);
+  });
 
   // The click that follows the release would otherwise also play from track 1.
   el.addEventListener('click', (e) => {
