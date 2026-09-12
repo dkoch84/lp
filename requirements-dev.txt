@@ -1,7 +1,7 @@
 pytest
 ruff
 
-# Browser tests (tests/test_web_hold.py). Uses the installed Google Chrome via
-# channel="chrome", so `playwright install` is NOT needed. Without playwright or
-# Chrome the browser tests skip rather than fail.
+# Browser tests (tests/test_web_*.py). They use the system Google Chrome when it
+# is installed; on a machine without it, run `python -m playwright install
+# chromium` once. Without either, those tests skip rather than fail.
 playwright

@@ -22,10 +22,10 @@ by a real browser. Two things this file pins down as a result:
   * the ordinary tap-to-play path is untouched, since the picker is an escape
     hatch and must not cost anything in normal use.
 
-Requirements: `pip install -r requirements-dev.txt` and Google Chrome. It drives
-the installed Chrome via channel="chrome", so `playwright install` is NOT
-needed. Without either, the module skips rather than fails, so the suite still
-runs on the kiosk and anywhere else Chrome is absent.
+Requirements: `pip install -r requirements-dev.txt`, plus a browser. The system
+Google Chrome is used when present; otherwise run `python -m playwright install
+chromium` once. Without either the module skips rather than fails, so the suite
+still runs on the kiosk. See the `chromium` fixture in conftest.py.
 
     .venv/bin/python -m pytest tests/test_web_track_picker.py
 """
@@ -108,8 +108,8 @@ def _free_port():
 
 
 @pytest.fixture(scope="module")
-def ui():
-    """The real app in real Chrome, sitting on the album grid."""
+def ui(chromium):
+    """The real app in a real browser, sitting on the album grid."""
     import uvicorn
 
     player = _Player()
@@ -127,50 +127,41 @@ def ui():
     if not server.started:
         pytest.skip("test server did not start")
 
-    with playwright_api.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(channel="chrome")
-        except Exception as e:                     # no Chrome on this machine
-            server.should_exit = True
-            pytest.skip(f"Chrome unavailable: {e}")
+    ctx = chromium.new_context(viewport={"width": 420, "height": 860},
+                               is_mobile=True, has_touch=True,
+                               device_scale_factor=2)
+    page = ctx.new_page()
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
+    page.wait_for_selector(".artist-tile", timeout=15000)
+    page.locator(".artist-tile").first.click()
+    page.wait_for_selector(".album-tile", timeout=15000)
 
-        ctx = browser.new_context(viewport={"width": 420, "height": 860},
-                                  is_mobile=True, has_touch=True,
-                                  device_scale_factor=2)
-        page = ctx.new_page()
-        page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
-        page.wait_for_selector(".artist-tile", timeout=15000)
-        page.locator(".artist-tile").first.click()
-        page.wait_for_selector(".album-tile", timeout=15000)
+    class _UI:
+        def __init__(self):
+            self.page = page
+            self.player = player
+            self.tile = page.locator(".album-tile").first
 
-        class _UI:
-            page = None
+        def tap_cover(self):
+            self.tile.locator(".album-cover, .album-cover-placeholder").first.tap()
+            page.wait_for_timeout(400)
 
-            def __init__(self):
-                self.page = page
-                self.player = player
-                self.tile = page.locator(".album-tile").first
+        def tap_caption(self):
+            self.tile.locator(".album-caption").tap()
+            page.wait_for_timeout(500)
 
-            def tap_cover(self):
-                self.tile.locator(".album-cover, .album-cover-placeholder").first.tap()
-                page.wait_for_timeout(400)
+        def sheet_open(self):
+            return page.locator("#track-sheet:not(.hidden)").count() > 0
 
-            def tap_caption(self):
-                self.tile.locator(".album-caption").tap()
-                page.wait_for_timeout(500)
+        def rows(self):
+            return page.locator("#track-sheet-list li")
 
-            def sheet_open(self):
-                return page.locator("#track-sheet:not(.hidden)").count() > 0
+        def close_sheet(self):
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(150)
 
-            def rows(self):
-                return page.locator("#track-sheet-list li")
-
-            def close_sheet(self):
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(150)
-
-        yield _UI()
-        browser.close()
+    yield _UI()
+    ctx.close()
     server.should_exit = True
 
 

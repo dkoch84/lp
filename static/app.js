@@ -36,6 +36,7 @@ let albumSortDir = localStorage.getItem('lp.albumSort') || 'asc';
 let gridMode = false;        // collage cover-selection mode
 let gridSelection = [];      // ordered album folders chosen for the collage
 let lastStatus = null;       // most recent /api/status, for the track sheet
+let artistsLoaded = false;   // the artist grid has been fetched at least once
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -162,7 +163,7 @@ function renderRecent() {
       </div>
     `;
     tile.addEventListener('click', () => playAlbum(a.artist, a.folder));
-    attachCaptionPicker(tile, () => openTrackSheet(a.artist, a.folder, a.name));
+    attachCaptionPicker(tile, () => goToTracks(a.artist, a.folder));
     recentGrid.appendChild(tile);
   }
   recentSection.classList.remove('hidden');
@@ -210,7 +211,7 @@ function renderArtists() {
       <div class="artist-name">${esc(a.name)}</div>
       <div class="artist-count">${a.album_count} album${a.album_count !== 1 ? 's' : ''}</div>
     `;
-    tile.addEventListener('click', () => showAlbums(a.name));
+    tile.addEventListener('click', () => goToArtist(a.name));
     tile.querySelector('.fav-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       toggleFavorite(a);
@@ -248,6 +249,7 @@ async function showArtists() {
   brand.classList.remove('hidden');
 
   allArtists = await api('/api/artists');
+  artistsLoaded = true;
   renderArtists();
   loadRecent();
 }
@@ -322,7 +324,7 @@ function renderAlbums() {
       // Albums with no cover art can't appear in the collage — not selectable.
     } else {
       tile.addEventListener('click', () => playAlbum(currentArtist, a.folder));
-      attachCaptionPicker(tile, () => openTrackSheet(currentArtist, a.folder, a.name));
+      attachCaptionPicker(tile, () => goToTracks(currentArtist, a.folder));
     }
     albumGrid.appendChild(tile);
   }
@@ -402,12 +404,27 @@ function attachCaptionPicker(tile, onPick) {
   });
 }
 
-function closeTrackSheet() {
+function hideTrackSheet() {
   trackSheet.classList.add('hidden');
   trackSheetList.innerHTML = '';
 }
 
-async function openTrackSheet(artistName, folder, albumName) {
+// Dismissing is a history move, not a DOM move: the sheet is a history entry,
+// so going back is what closes it, and that keeps the back button and the
+// backdrop doing the same thing.
+function closeTrackSheet() {
+  if (routeState().tracks) history.back();
+  else hideTrackSheet();
+}
+
+function albumNameFor(artistName, folder) {
+  const inView = currentAlbums.find(a => a.folder === folder);
+  if (inView) return inView.name;
+  const inRecent = recentAlbums.find(a => a.artist === artistName && a.folder === folder);
+  return inRecent ? inRecent.name : folder;
+}
+
+async function renderTrackSheet(artistName, folder, albumName) {
   let info;
   try {
     info = await api(`/api/albums/${encodeURIComponent(artistName)}/${encodeURIComponent(folder)}/tracks`);
@@ -435,7 +452,7 @@ async function openTrackSheet(artistName, folder, albumName) {
     li.addEventListener('click', async () => {
       closeTrackSheet();
       await playAlbum(artistName, folder, i);
-    });
+    });   // closeTrackSheet() pops the sheet entry, so back does not reopen it
     trackSheetList.appendChild(li);
   });
 
@@ -460,7 +477,9 @@ npStop.addEventListener('click', async () => {
 // --- Back ---
 
 backBtn.addEventListener('click', () => {
-  showArtists();
+  // Up and back are the same move here, so let history do it: the header
+  // button and the browser button can never disagree.
+  history.back();
 });
 
 // --- Status polling ---
@@ -499,9 +518,97 @@ async function loadVersion() {
   }
 }
 
+// --- Routing ---
+//
+// The UI is a single page, so without this the back button leaves the site
+// instead of going up a level, which is what everyone expects a website to do.
+// Each view and the track picker is a history entry described entirely by the
+// URL, so back, forward, reload, and a pasted link all behave.
+//
+//   /                        the artist grid
+//   /?artist=Pallbearer      that artist's albums
+//   /?artist=X&tracks=Y      the track picker open over them
+//
+// Query string rather than path segments on purpose: the app is served by
+// StaticFiles at "/", so /artist/X would 404 on a reload while /?artist=X
+// serves index.html and lets the router sort it out.
+
+function routeState() {
+  const p = new URLSearchParams(location.search);
+  return {artist: p.get('artist') || null, tracks: p.get('tracks') || null};
+}
+
+function routeUrl(state) {
+  const p = new URLSearchParams();
+  if (state.artist) p.set('artist', state.artist);
+  if (state.tracks) p.set('tracks', state.tracks);
+  const q = p.toString();
+  return q ? `${location.pathname}?${q}` : location.pathname;
+}
+
+// Renders whatever the given state describes. The ONLY place that decides what
+// is on screen, so pushing history and responding to back run the same code.
+async function applyRoute(state) {
+  if (state.artist) {
+    if (currentArtist !== state.artist) {
+      try {
+        await showAlbums(state.artist);
+      } catch {
+        // A stale or hand-typed artist. Fall back rather than showing nothing.
+        return navigate({artist: null, tracks: null}, {replace: true});
+      }
+    }
+  } else if (currentArtist !== null || !artistsLoaded) {
+    await showArtists();
+  }
+
+  if (state.tracks) {
+    await renderTrackSheet(state.artist, state.tracks,
+                           albumNameFor(state.artist, state.tracks));
+  } else {
+    hideTrackSheet();
+  }
+}
+
+function navigate(state, {replace = false} = {}) {
+  const url = routeUrl(state);
+  if (replace) history.replaceState(state, '', url);
+  else history.pushState(state, '', url);
+  return applyRoute(state);
+}
+
+const goToArtist = (name) => navigate({artist: name, tracks: null});
+// The picker is reachable from the Recently Played shelf too, where no artist
+// is in view. Naming the artist anyway keeps the URL self-contained, so a
+// reload lands on that artist's albums with the picker open.
+const goToTracks = (artist, folder) => navigate({artist, tracks: folder});
+
+window.addEventListener('popstate', (e) => {
+  applyRoute(e.state || routeState());
+});
+
+async function startRouter() {
+  const state = routeState();
+  if (!state.artist && !state.tracks) {
+    return navigate(state, {replace: true});
+  }
+  // A pasted link lands mid-app with nothing behind it, so back (and the header
+  // back button, which is the same thing) would leave the site. Seed the levels
+  // underneath as history entries WITHOUT rendering them: no wasted fetch and
+  // no flash of the artist grid, and popstate renders each one if you walk back
+  // into it.
+  const base = {artist: null, tracks: null};
+  history.replaceState(base, '', routeUrl(base));
+  if (state.tracks && state.artist) {
+    const view = {artist: state.artist, tracks: null};
+    history.pushState(view, '', routeUrl(view));
+  }
+  return navigate(state);
+}
+
 // --- Init ---
 
-showArtists();
+startRouter();
 loadVersion();
 statusInterval = setInterval(pollStatus, 3000);
 pollStatus();
