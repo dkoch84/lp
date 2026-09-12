@@ -362,10 +362,22 @@ class PlayerBackend:
         """Apply (or clear) a live equalizer. `bands` is a list of per-band dB
         gains (len == eq_bands()); `preamp` is dB.
 
-        NB: this python-vlc build segfaults on ``AudioEqualizer(preset_index)``
-        (the new-from-preset ctype is mistracked), so we ALWAYS build an empty
-        equalizer and set the amps ourselves — preset *curves* live in the app
-        layer and arrive here as explicit band lists."""
+        NB: we ALWAYS build an empty equalizer and set the amps ourselves;
+        preset *curves* live in the app layer and arrive here as explicit band
+        lists. That is not a stylistic choice: ``vlc.AudioEqualizer(i)`` is not
+        a preset constructor. python-vlc's ``_Ctype.__new__`` treats a lone int
+        as an internal RAW C POINTER and passes it to ``_Constructor``, which
+        wraps it with ``ctypes.c_void_p(ptr)``. So ``AudioEqualizer(0)`` returns
+        None (``_Constructor``'s ptr == 0 guard) and ``AudioEqualizer(1)``
+        returns an object pointing at memory address 0x1, which segfaults on
+        first use. Verified against python-vlc 3.0.21203 / libVLC 3.0.23.
+
+        There is no upstream issue for this (as of 2026-09 the only equalizer
+        issue on oaubert/python-vlc is #208, unrelated); the behaviour is
+        visible in the generated binding's ``_Constructor``. If libVLC's own
+        curves are ever wanted, the working API is the module-level
+        ``vlc.libvlc_audio_equalizer_new_from_preset(i)``, never the class ctor.
+        tests/test_player_eq.py holds canaries that fail if this changes."""
         if not enabled:
             self._eq = None
             try:

@@ -99,11 +99,15 @@ The transport and library now carry what most desktop players have:
 | Expanded view | Full transport mirrored into the full-screen now-playing: shuffle/repeat/seek/volume/favourite + lyrics + vinyl toggles |
 
 `mpris.py` is Qt-free and optional (graceful `None` if dbus-next/bus is absent).
-EQ uses our own preset curves because this python-vlc build segfaults on
-libVLC's `AudioEqualizer(preset)` ctor; crossfade routes through a manual
-two-player engine (`_play_crossfade`) since the gapless list player has no overlap
-— crossfade `0` keeps the pure gapless path. The lyrics parser is unit-tested
-(`tests/test_lyrics.py`, 14 cases).
+EQ uses our own preset curves because `vlc.AudioEqualizer(i)` is not a preset
+constructor: python-vlc treats a lone int as a raw C pointer, so index `0`
+yields `None` and any other index yields an object pointing at that memory
+address, which segfaults on first use. The working preset API is the
+module-level `vlc.libvlc_audio_equalizer_new_from_preset(i)`. See
+`lpcore.player.set_equalizer` and the canaries in `tests/test_player_eq.py`.
+Crossfade routes through a manual two-player engine (`_play_crossfade`) since
+the gapless list player has no overlap; crossfade `0` keeps the pure gapless
+path. The lyrics parser is unit-tested (`tests/test_lyrics.py`, 14 cases).
 
 Possible polish (not blocking): per-view filters beyond sort, live re-query of the
 now-open song table after an external reindex, richer vinyl controls
