@@ -32,9 +32,44 @@ log = logging.getLogger("lpdeck.mpris")
 BUS_NAME = "org.mpris.MediaPlayer2.lpdeck"
 OBJECT_PATH = "/org/mpris/MediaPlayer2"
 
+# lp-deck's repeat modes and MPRIS LoopStatus values.
+_LOOP_FOR_REPEAT = {"off": "None", "all": "Playlist", "one": "Track"}
+
+
+def loop_status_for(repeat):
+    """MPRIS LoopStatus for a repeat mode ('off' | 'all' | 'one')."""
+    return _LOOP_FOR_REPEAT.get(repeat, "None")
+
+
+def repeat_for_loop_status(status):
+    """Repeat mode for an MPRIS LoopStatus, or None for an unknown value."""
+    return {v: k for k, v in _LOOP_FOR_REPEAT.items()}.get(status)
+
+
+def seek_target(position, offset_us, length):
+    """Where MPRIS Seek(offset) lands: ('seek', seconds) within the track, or
+    ('next', None) when it goes past the end (the spec says to skip then).
+    Seeking back past the start lands at 0."""
+    target = position + offset_us / 1_000_000
+    if length and target >= length:
+        return "next", None
+    return "seek", max(0.0, target)
+
+
+def set_position_target(position_us, length):
+    """Seconds for MPRIS SetPosition, or None when outside the track (ignored)."""
+    seconds = position_us / 1_000_000
+    if seconds < 0 or (length and seconds > length):
+        return None
+    return seconds
+
 
 def start_mpris(player):
     """Start the MPRIS2 D-Bus service for ``player`` in a background thread.
+
+    Changes that also update the window (repeat, shuffle, raising it) go through
+    ``handle.set_controls(send)``: ``send(name, value)`` must be safe to call
+    from this service's thread (lp-deck passes a Qt signal's emit).
 
     Returns a handle object with a ``.stop()`` method on success, or ``None`` if
     MPRIS could not be started (dbus-next missing, no session bus, etc.).
@@ -53,6 +88,20 @@ def start_mpris(player):
         return None
 
     # ------------------------------------------------------------------ helpers
+    _controls = {"send": None}
+
+    def _send(name, value=""):
+        """Hand a request to the app. False when no app hook is set."""
+        send = _controls["send"]
+        if send is None:
+            return False
+        try:
+            send(name, value)
+            return True
+        except Exception as e:
+            log.debug("MPRIS: control %s failed: %s", name, e)
+            return False
+
     def _safe(fn, default=None):
         """Call a player/backend method, swallowing any backend hiccup so it
         never propagates into the dbus loop."""
@@ -69,7 +118,7 @@ def start_mpris(player):
 
         @method()
         def Raise(self):
-            pass
+            _send("raise")
 
         @method()
         def Quit(self):
@@ -81,7 +130,7 @@ def start_mpris(player):
 
         @dbus_property(access=PropertyAccess.READ)
         def CanRaise(self) -> "b":
-            return False
+            return _controls["send"] is not None
 
         @dbus_property(access=PropertyAccess.READ)
         def HasTrackList(self) -> "b":
@@ -136,17 +185,30 @@ def start_mpris(player):
 
         @method()
         def Seek(self, offset: "x"):
-            pass
+            action, seconds = seek_target(
+                _safe(player.backend.get_current_time, 0.0), offset,
+                _safe(player.backend.get_total_time, 0.0))
+            if action == "next":
+                _safe(player.next)
+            else:
+                _safe(lambda: player.backend.seek_track(seconds))
 
         @method()
         def SetPosition(self, track_id: "o", position: "x"):
-            pass
+            if track_id != self._trackid():      # the spec: ignore a stale track id
+                return
+            seconds = set_position_target(position, _safe(player.backend.get_total_time, 0.0))
+            if seconds is not None:
+                _safe(lambda: player.backend.seek_track(seconds))
 
         @method()
         def OpenUri(self, uri: "s"):
             pass
 
         # -- helpers ---------------------------------------------------------
+        def _trackid(self) -> str:
+            return f"/org/mpris/MediaPlayer2/lpdeck/track/{self._trackid_counter:d}"
+
         def _playback_status(self) -> str:
             if _safe(player.backend.is_actively_playing, False):
                 return "Playing"
@@ -159,8 +221,7 @@ def start_mpris(player):
             if not cur:
                 return {}
 
-            trackid = f"/org/mpris/MediaPlayer2/lpdeck/track/{self._trackid_counter:d}"
-            meta = {"mpris:trackid": Variant("o", trackid)}
+            meta = {"mpris:trackid": Variant("o", self._trackid())}
 
             title = cur.get("title")
             meta["xesam:title"] = Variant("s", title or "")
@@ -191,9 +252,15 @@ def start_mpris(player):
         def PlaybackStatus(self) -> "s":
             return self._playback_status()
 
-        @dbus_property(access=PropertyAccess.READ)
+        @dbus_property(access=PropertyAccess.READWRITE)
         def LoopStatus(self) -> "s":
-            return "None"
+            return loop_status_for(getattr(player, "repeat", "off"))
+
+        @LoopStatus.setter
+        def LoopStatus(self, value: "s"):
+            mode = repeat_for_loop_status(value)
+            if mode and not _send("repeat", mode):
+                _safe(lambda: player.set_repeat(mode))
 
         @dbus_property(access=PropertyAccess.READ)
         def Rate(self) -> "d":
@@ -207,9 +274,14 @@ def start_mpris(player):
         def MaximumRate(self) -> "d":
             return 1.0
 
-        @dbus_property(access=PropertyAccess.READ)
+        @dbus_property(access=PropertyAccess.READWRITE)
         def Shuffle(self) -> "b":
             return bool(getattr(player, "shuffle", False))
+
+        @Shuffle.setter
+        def Shuffle(self, value: "b"):
+            if not _send("shuffle", "true" if value else "false"):
+                _safe(lambda: player.set_shuffle(bool(value)))
 
         @dbus_property(access=PropertyAccess.READWRITE)
         def Volume(self) -> "d":
@@ -247,7 +319,7 @@ def start_mpris(player):
 
         @dbus_property(access=PropertyAccess.READ)
         def CanSeek(self) -> "b":
-            return False
+            return _safe(player.current, None) is not None
 
         @dbus_property(access=PropertyAccess.READ)
         def CanControl(self) -> "b":
@@ -264,6 +336,9 @@ def start_mpris(player):
                     {
                         "PlaybackStatus": self._playback_status(),
                         "Metadata": self._build_metadata(),
+                        "LoopStatus": loop_status_for(getattr(player, "repeat", "off")),
+                        "Shuffle": bool(getattr(player, "shuffle", False)),
+                        "CanSeek": _safe(player.current, None) is not None,
                     }
                 )
             except Exception as e:
@@ -284,6 +359,17 @@ def start_mpris(player):
             self._root_iface = MediaPlayer2Interface()
             self._ready = threading.Event()
             self._ok = False
+
+        def set_controls(self, send):
+            """Route repeat, shuffle and raise requests through the app."""
+            _controls["send"] = send
+
+        def _on_seeked(self):
+            position = _safe(lambda: int(player.backend.get_current_time() * 1_000_000), 0)
+            try:
+                self.loop.call_soon_threadsafe(self._player_iface.Seeked, position)
+            except Exception as e:
+                log.debug("MPRIS: Seeked failed: %s", e)
 
         # called on the player/VLC/Qt thread -> marshal into the asyncio loop
         def _on_event(self, bump=False):
@@ -334,6 +420,9 @@ def start_mpris(player):
                 player.backend.on("play_start", lambda: self._on_event(bump=False))
                 player.backend.on("track_change", lambda: self._on_event(bump=True))
                 player.backend.on("stop", lambda: self._on_event(bump=False))
+                for event in ("paused", "resumed", "queue_change", "album_end"):
+                    player.backend.on(event, lambda: self._on_event(bump=False))
+                player.backend.on("seeked", self._on_seeked)
             except Exception as e:
                 log.debug("MPRIS: could not subscribe to backend events: %s", e)
             log.info("MPRIS service started (%s)", BUS_NAME)

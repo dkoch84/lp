@@ -280,6 +280,10 @@ class Controller(QObject):
     scanChanged = Signal()               # scanning state / status text
     _scanProgress = Signal(int, int, int)    # indexer thread → GUI thread
     _scanDone = Signal(str)
+    noticeChanged = Signal()             # a short message for the user (skipped track, …)
+    raiseRequested = Signal()            # bring the window forward (desktop media controls)
+    externalCommand = Signal(str, str)   # requests from other threads (MPRIS), run on the GUI thread
+    _backendEvent = Signal(str)          # backend thread → GUI thread
     _bump = Signal()                     # backend thread → GUI thread marshalling
 
     ALBUM_ORDERS = {"year": "al.year, al.name", "name": "al.name, al.year"}
@@ -333,6 +337,11 @@ class Controller(QObject):
         self._bump.connect(self._refresh_now_playing)
         for ev in ("play_start", "track_change", "stop"):
             self.player.backend.on(ev, self._bump.emit)
+        self._notice = ""
+        self._backendEvent.connect(self._on_backend_event)
+        self.externalCommand.connect(self._on_external_command)
+        for ev in ("queue_change", "track_error", "stopped_after", "paused", "resumed"):
+            self.player.backend.on(ev, lambda ev=ev: self._backendEvent.emit(ev))
         self.libraryChanged.connect(self.artists.reload)
 
         # music library folder + background scanning
@@ -690,6 +699,79 @@ class Controller(QObject):
         self.queue.reload()
         self.queueChanged.emit()
 
+    # --- editing the queue ---
+
+    @Slot(int)
+    def removeFromQueue(self, index):
+        self.player.remove(index)
+        self.queue.reload()
+        self.queueChanged.emit()
+        if not self.player.queue:
+            self._refresh_now_playing()
+
+    @Slot(int, int)
+    def moveInQueue(self, src, dst):
+        self.player.move(src, dst)
+        self.queue.reload()
+        self.queueChanged.emit()
+
+    @Slot()
+    def clearQueue(self):
+        self.player.clear()
+        self._np_playlist_id = -1
+        self.transportChanged.emit()
+        self._refresh_now_playing()
+
+    @Property(bool, notify=transportChanged)
+    def stopAfterCurrent(self):
+        return bool(getattr(self.player, "stop_after_current", False))
+
+    @Slot()
+    def toggleStopAfterCurrent(self):
+        self.player.set_stop_after_current(not self.stopAfterCurrent)
+        self.transportChanged.emit()
+
+    # --- notices ---
+
+    @Property(str, notify=noticeChanged)
+    def notice(self):
+        return self._notice
+
+    def _set_notice(self, text):
+        self._notice = text
+        self.noticeChanged.emit()
+
+    @Slot()
+    def clearNotice(self):
+        if self._notice:
+            self._set_notice("")
+
+    def _on_backend_event(self, event):
+        """Backend events that aren't a track change, on the GUI thread."""
+        if event == "track_error":
+            idx, path = getattr(self.player.backend, "last_error", None) or (-1, None)
+            q = self.player.queue
+            title = q[idx].get("title") if 0 <= idx < len(q) else None
+            name = title or (os.path.basename(path) if path else "a track")
+            self._set_notice(f"Skipped \u201c{name}\u201d: the file couldn't be played.")
+        elif event == "stopped_after":
+            self.transportChanged.emit()
+        if event in ("paused", "resumed", "stopped_after"):
+            self.progressChanged.emit()
+        self.queue.reload()
+        self.queueChanged.emit()
+
+    def _on_external_command(self, name, value):
+        """Requests from outside the window, such as desktop media controls."""
+        if name == "repeat":
+            self.player.set_repeat(value)
+            self._settings.setValue("repeat", self.player.repeat)
+            self.transportChanged.emit()
+        elif name == "shuffle":
+            self.setShuffle(value == "true")
+        elif name == "raise":
+            self.raiseRequested.emit()
+
     def _current_track(self):
         i = self.player.index
         q = self.player.queue
@@ -930,6 +1012,12 @@ class Controller(QObject):
     @Slot(float)
     def seek(self, frac):
         self.player.seek(frac)
+        self.progressChanged.emit()
+
+    @Slot(float)
+    def seekBy(self, seconds):
+        """Forward or back within the playing track (keyboard shortcuts)."""
+        self.player.seek_by(seconds)
         self.progressChanged.emit()
 
     # --- favorites / ratings / play stats ---

@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lpdeck.player import QueuePlayer
+from lpdeck.player import QueuePlayer, drop_missing
 
 
 class FakeBackend:
@@ -46,6 +46,27 @@ class FakeBackend:
     def jump_to(self, idx):
         self.calls.append(("jump_to", idx))
         self.current_song_index = idx
+
+    def replace_upcoming(self, files, durations=None):
+        self.calls.append(("replace_upcoming", list(files), list(durations or [])))
+
+    def remove_track(self, idx):
+        self.calls.append(("remove_track", idx))
+
+    def move_track(self, src, dst):
+        self.calls.append(("move_track", src, dst))
+
+    def clear_queue(self):
+        self.calls.append(("clear_queue",))
+
+    def get_total_time(self):
+        return 200.0
+
+    def seek_track(self, seconds):
+        self.calls.append(("seek_track", seconds))
+
+    def next_track(self):
+        self.calls.append(("next_track",))
 
     def get_current_time(self):
         return self.time
@@ -151,3 +172,98 @@ def test_autosave_writes_as_playback_happens(tmp_path):
     assert json.loads(path.read_text())["index"] == 1
     for event in ("play_start", "stop", "queue_change"):
         assert event in b.callbacks
+
+
+
+# --- shuffle without a restart, editing, seeking, missing files -----------------------
+
+def test_shuffle_reorders_only_what_is_still_to_come(tmp_path):
+    b = FakeBackend()
+    q = QueuePlayer(b)
+    tracks = _tracks("a", "b", "c", "d", "e", "f")
+    q.set_queue(tracks)
+    b.current_song_index = 2                 # c playing; a, b played
+    b.calls.clear()
+    q.set_shuffle(True)
+    assert _paths(q.queue[:3]) == _paths(tracks[:3])
+    assert sorted(_paths(q.queue[3:])) == sorted(_paths(tracks[3:]))
+    assert [c[0] for c in b.calls] == ["replace_upcoming"]     # no reload, no restart
+    assert b.calls[0][1] == _paths(q.queue[3:])
+    q.set_shuffle(False)
+    assert _paths(q.queue) == _paths(tracks)
+    assert "play_tracks" not in [c[0] for c in b.calls]
+
+
+def test_remove_keeps_both_orders_in_step():
+    b = FakeBackend()
+    q = QueuePlayer(b)
+    q.set_queue(_tracks("a", "b", "c"))
+    q.remove(1)
+    assert _paths(q.queue) == ["/music/a.flac", "/music/c.flac"]
+    assert b.calls[-1] == ("remove_track", 1)
+    q.set_shuffle(True)
+    q.set_shuffle(False)
+    assert _paths(q.queue) == ["/music/a.flac", "/music/c.flac"]
+
+
+def test_move_rearranges_and_becomes_the_unshuffled_order():
+    b = FakeBackend()
+    q = QueuePlayer(b)
+    q.set_queue(_tracks("a", "b", "c", "d"))
+    q.move(3, 1)
+    assert _paths(q.queue) == ["/music/a.flac", "/music/d.flac", "/music/b.flac", "/music/c.flac"]
+    assert b.calls[-1] == ("move_track", 3, 1)
+    q.set_shuffle(True)
+    q.set_shuffle(False)
+    assert _paths(q.queue) == ["/music/a.flac", "/music/d.flac", "/music/b.flac", "/music/c.flac"]
+    q.move(0, 9)                             # out of range: ignored
+    assert b.calls[-1][0] == "replace_upcoming"
+
+
+def test_clear_empties_everything():
+    b = FakeBackend()
+    q = QueuePlayer(b)
+    q.set_queue(_tracks("a", "b"), album_path="/music")
+    q.clear()
+    assert q.queue == [] and q.album_path is None
+    assert b.calls[-1] == ("clear_queue",)
+
+
+def test_seek_by_moves_within_the_track_or_on_past_its_end():
+    b = FakeBackend()
+    q = QueuePlayer(b)
+    b.time = 50.0
+    q.seek_by(10)
+    assert b.calls[-1] == ("seek_track", 60.0)
+    q.seek_by(-80)
+    assert b.calls[-1] == ("seek_track", 0.0)
+    q.seek_by(500)
+    assert b.calls[-1] == ("next_track",)
+
+
+def test_stop_after_current_passes_through():
+    b = FakeBackend()
+    q = QueuePlayer(b)
+    q.set_stop_after_current(True)
+    assert q.stop_after_current is True and b.stop_after_current is True
+
+
+def test_drop_missing_keeps_the_same_track_playing():
+    tracks = _tracks("a", "b", "c", "d")
+    gone = {"/music/a.flac", "/music/c.flac"}
+    kept, index, offset, dropped = drop_missing(tracks, 3, 42.0, exists=lambda p: p not in gone)
+    assert _paths(kept) == ["/music/b.flac", "/music/d.flac"]
+    assert (index, offset, dropped) == (1, 42.0, 2)
+
+
+def test_drop_missing_when_the_current_track_is_gone():
+    tracks = _tracks("a", "b", "c")
+    kept, index, offset, dropped = drop_missing(tracks, 1, 42.0,
+                                                exists=lambda p: p != "/music/b.flac")
+    assert _paths(kept) == ["/music/a.flac", "/music/c.flac"]
+    assert (index, offset, dropped) == (1, 0.0, 1)   # c, from its start
+
+
+def test_drop_missing_changes_nothing_when_all_exist():
+    tracks = _tracks("a", "b")
+    assert drop_missing(tracks, 1, 5.0, exists=lambda p: True) == (tracks, 1, 5.0, 0)

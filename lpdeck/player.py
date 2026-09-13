@@ -22,6 +22,21 @@ def _durations(tracks):
     return [float(t.get("duration") or 0) for t in tracks]
 
 
+def drop_missing(tracks, index, offset, exists=os.path.exists):
+    """Leave out tracks whose files are gone (moved, deleted, share not mounted)
+    from a saved session, so the queue doesn't stall on them. Keeps the index on
+    the same track, or on the next one that exists if it was the current track
+    that went missing (from its start). Returns (tracks, index, offset, dropped)."""
+    present = [(i, t) for i, t in enumerate(tracks) if t.get("path") and exists(t["path"])]
+    if len(present) == len(tracks):
+        return list(tracks), index, offset, 0
+    kept = [t for _, t in present]
+    before = sum(1 for i, _ in present if i < index)
+    current_kept = any(i == index for i, _ in present)
+    new_index = min(before, max(len(kept) - 1, 0))
+    return kept, new_index, (offset if current_kept else 0.0), len(tracks) - len(kept)
+
+
 class QueuePlayer:
     def __init__(self, backend, scrobbler=None):
         self.backend = backend          # lpcore.player.PlayerBackend
@@ -93,27 +108,26 @@ class QueuePlayer:
             self.backend.append_tracks(paths, durations=_durations(tracks))
 
     def set_shuffle(self, on):
-        """Toggle shuffle. While playing, reshuffle the *upcoming* tracks (or
-        restore natural order) and continue from the current track."""
+        """Toggle shuffle for the tracks still to come. The playing track and the
+        ones already played stay where they are, so playback carries on without a
+        break: shuffling reorders what's next, and turning it off puts what's next
+        back in the order it was queued."""
         on = bool(on)
         if on == self.shuffle:
             return
         self.shuffle = on
         if not self.queue:
             return
-        cur = self.current()
-        offset = self.backend.get_current_time()
+        cut = self.index + 1
+        upcoming = list(self.queue[cut:])
         if on:
-            rest = [t for t in self.queue if t is not cur]
-            random.shuffle(rest)
-            new = ([cur] if cur else []) + rest
+            random.shuffle(upcoming)
         else:
-            new = list(self._natural) if self._natural else list(self.queue)
-        self.queue = new
-        start = next((i for i, t in enumerate(new) if t is cur), 0)
-        self.backend.play_tracks([t["path"] for t in new],
-                                 album_path=self.album_path, start=start,
-                                 start_offset=offset, durations=_durations(new))
+            still_to_come = {id(t) for t in upcoming}
+            upcoming = [t for t in self._natural if id(t) in still_to_come]
+        self.queue = self.queue[:cut] + upcoming
+        self.backend.replace_upcoming([t["path"] for t in upcoming],
+                                      durations=_durations(upcoming))
 
     def set_repeat(self, mode):
         self.repeat = mode if mode in ("off", "all", "one") else "off"
@@ -128,6 +142,51 @@ class QueuePlayer:
         moves within the loaded list, so the queue isn't reloaded."""
         if 0 <= index < len(self.queue):
             self.backend.jump_to(index)
+
+    def remove(self, index):
+        """Take the track at `index` out of the queue."""
+        if not 0 <= index < len(self.queue):
+            return
+        gone = self.queue.pop(index)
+        self._natural = [t for t in self._natural if t is not gone]
+        if not self.queue:
+            self.album_path = None
+        self.backend.remove_track(index)
+
+    def move(self, src, dst):
+        """Move the track at `src` to position `dst`."""
+        n = len(self.queue)
+        if not (0 <= src < n and 0 <= dst < n) or src == dst:
+            return
+        self.queue.insert(dst, self.queue.pop(src))
+        if not self.shuffle:
+            self._natural = list(self.queue)   # the unshuffled order is the one you arranged
+        self.backend.move_track(src, dst)
+
+    def clear(self):
+        """Stop and empty the queue."""
+        self.queue = []
+        self._natural = []
+        self.album_path = None
+        self.backend.clear_queue()
+
+    @property
+    def stop_after_current(self):
+        return bool(getattr(self.backend, "stop_after_current", False))
+
+    def set_stop_after_current(self, on):
+        """Pause when the playing track ends, ready at the start of the next."""
+        self.backend.stop_after_current = bool(on)
+
+    def seek_by(self, seconds):
+        """Move `seconds` forward (or back, if negative) in the playing track;
+        going past its end moves to the next track."""
+        target = self.backend.get_current_time() + seconds
+        length = self.backend.get_total_time()
+        if length and target >= length:
+            self.backend.next_track()
+            return
+        self.backend.seek_track(max(0.0, target))
 
     @property
     def index(self):

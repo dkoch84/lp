@@ -12,7 +12,7 @@ import yaml
 from lpcore.player import PlayerBackend
 from lpcore.scrobbler import Scrobbler
 from . import db, mpris
-from .player import QueuePlayer
+from .player import QueuePlayer, drop_missing
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(
@@ -30,10 +30,12 @@ def _restore_session(player):
     if st.get("repeat"):
         player.set_repeat(st["repeat"])
     player.shuffle = bool(st.get("shuffle"))
-    queue = st.get("queue") or []
+    queue, index, offset, dropped = drop_missing(
+        st.get("queue") or [], st.get("index", 0), st.get("offset", 0.0))
+    if dropped:
+        print(f"lp-deck: left {dropped} missing track(s) out of the restored queue")
     if queue:
-        player.restore_queue(queue, st.get("index", 0),
-                             st.get("offset", 0.0), st.get("album_path"))
+        player.restore_queue(queue, index, offset, st.get("album_path"))
 
 
 def _load_config():
@@ -80,6 +82,9 @@ def main():
         folder = chosen if chosen and os.path.isdir(chosen) else music_path
         controller.use_music_folder(folder)
         controller.start_index(folder)
+        if mpris_handle:
+            # repeat, shuffle and raise requests from the desktop update the window too
+            mpris_handle.set_controls(controller.externalCommand.emit)
 
     try:
         sys.exit(qmlapp.run(con, player, db_path, on_ready=on_ready))

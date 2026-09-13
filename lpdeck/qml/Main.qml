@@ -59,6 +59,63 @@ ApplicationWindow {
     // (null); bind to `win.appController` instead.
     property var appController: controller
 
+    // ---- keyboard shortcuts (off while typing in a text field) ----
+    readonly property bool typing: activeFocusItem !== null
+                                   && activeFocusItem.hasOwnProperty("cursorPosition")
+    readonly property bool keysFree: !typing && !popupOpen
+    Shortcut { sequence: "Space"; enabled: win.keysFree; onActivated: controller.playPause() }
+    Shortcut { sequence: "Ctrl+Right"; enabled: win.keysFree; onActivated: controller.next() }
+    Shortcut { sequence: "Ctrl+Left"; enabled: win.keysFree; onActivated: controller.previous() }
+    Shortcut { sequence: "Shift+Right"; enabled: win.keysFree; onActivated: controller.seekBy(10) }
+    Shortcut { sequence: "Shift+Left"; enabled: win.keysFree; onActivated: controller.seekBy(-10) }
+    Shortcut { sequence: "Ctrl+Up"; enabled: win.keysFree
+               onActivated: controller.setVolume(controller.volume + 5) }
+    Shortcut { sequence: "Ctrl+Down"; enabled: win.keysFree
+               onActivated: controller.setVolume(controller.volume - 5) }
+    Shortcut { sequence: "Ctrl+M"; enabled: !win.popupOpen; onActivated: controller.toggleMute() }
+    Shortcut { sequence: "Ctrl+S"; enabled: !win.popupOpen
+               onActivated: controller.setShuffle(!controller.shuffle) }
+    Shortcut { sequence: "Ctrl+R"; enabled: !win.popupOpen; onActivated: controller.cycleRepeat() }
+    Shortcut { sequence: "Ctrl+."; enabled: !win.popupOpen
+               onActivated: controller.toggleStopAfterCurrent() }
+    Shortcut { sequence: "Ctrl+F"; enabled: !win.popupOpen
+               onActivated: { search.forceActiveFocus(); search.selectAll() } }
+
+    // bring the window forward when the desktop's media controls ask
+    Connections {
+        target: controller
+        function onRaiseRequested() { win.show(); win.raise(); win.requestActivate() }
+        function onNoticeChanged() { if (controller.notice !== "") noticeTimer.restart() }
+    }
+
+    // ---- notice toast (a skipped track, …) ----
+    Rectangle {
+        id: noticeToast
+        parent: Overlay.overlay
+        z: 1000
+        readonly property bool shown: controller && controller.notice !== ""
+        opacity: shown ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        width: Math.min(noticeText.implicitWidth + 36, win.width - 40)
+        height: noticeText.implicitHeight + 20
+        x: Math.round((parent.width - width) / 2)
+        y: parent.height - height - 110
+        radius: 10
+        color: theme.surface
+        border.color: theme.line
+        Label {
+            id: noticeText
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, win.width - 76)
+            text: controller ? controller.notice : ""
+            color: theme.text; font.pixelSize: 13
+            wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
+        }
+        TapHandler { onTapped: controller.clearNotice() }
+        Timer { id: noticeTimer; interval: 5000; onTriggered: controller.clearNotice() }
+    }
+
     function fmtTime(s) {
         s = Math.max(0, Math.round(s))
         return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2)
@@ -1550,6 +1607,11 @@ ApplicationWindow {
                 Label { text: "Queue"; color: theme.text
                         font.pixelSize: 16; font.weight: Font.Bold }
                 Item { Layout.fillWidth: true }
+                Pill { label: "Stop after this"; visible: controller.queueCount > 0
+                       selected: controller.stopAfterCurrent
+                       onClicked: controller.toggleStopAfterCurrent() }
+                Pill { label: "Clear"; visible: controller.queueCount > 0
+                       onClicked: controller.clearQueue() }
             }
 
             Label {
@@ -1570,6 +1632,7 @@ ApplicationWindow {
                 ScrollBar.vertical: ScrollBar { }
                 WheelScroller { view: queueList }
                 currentIndex: -1
+                property int dropIndex: -1           // where a dragged row would land
                 delegate: Rectangle {
                     required property string title
                     required property string artist
@@ -1583,12 +1646,35 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.leftMargin: 10; anchors.rightMargin: 10
                         spacing: 10
+                        // row number, or a handle to drag the row to a new place
                         Label {
-                            text: isCurrent ? "▶" : (index + 1)
+                            text: dragArea.containsMouse || dragArea.pressed ? "⠿"
+                                  : (isCurrent ? "▶" : (index + 1))
                             color: isCurrent ? theme.accent : theme.textDim
                             font.pixelSize: isCurrent ? 12 : 13
                             Layout.preferredWidth: 20
                             horizontalAlignment: Text.AlignHCenter
+                            MouseArea {
+                                id: dragArea
+                                anchors.fill: parent; anchors.margins: -8
+                                hoverEnabled: true
+                                preventStealing: true
+                                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                                function target(mouse) {
+                                    var p = mapToItem(queueList.contentItem, mouse.x, mouse.y)
+                                    var to = queueList.indexAt(20, p.y)
+                                    return to >= 0 ? to : (p.y < 0 ? 0 : queueList.count - 1)
+                                }
+                                onPositionChanged: (mouse) => {
+                                    if (pressed) queueList.dropIndex = target(mouse)
+                                }
+                                onReleased: (mouse) => {
+                                    var to = target(mouse)
+                                    queueList.dropIndex = -1
+                                    if (to !== index) controller.moveInQueue(index, to)
+                                }
+                                onCanceled: queueList.dropIndex = -1
+                            }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true; spacing: 0
@@ -1606,10 +1692,18 @@ ApplicationWindow {
                             }
                         }
                         Label { text: win.fmtTime(duration); color: theme.textDim
-                                font.pixelSize: 12 }
+                                font.pixelSize: 12; visible: !qh.hovered }
+                        IconButton { glyph: "✕"; visible: qh.hovered
+                                     onClicked: controller.removeFromQueue(index) }
                     }
                     HoverHandler { id: qh }
                     TapHandler { onTapped: controller.jumpTo(index) }
+                    Rectangle {                          // drop marker while dragging
+                        visible: queueList.dropIndex === index
+                        anchors.left: parent.left; anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 2; color: theme.accent
+                    }
                 }
             }
 
@@ -1799,6 +1893,31 @@ ApplicationWindow {
             Label { visible: controller.replayGainMode !== "none"
                     text: "Applies after restart."
                     color: theme.textDim; font.pixelSize: 10 }
+
+            // ---- Keyboard shortcuts ----
+            Label { text: "Keyboard shortcuts"; color: theme.textDim
+                    font.pixelSize: 12; Layout.topMargin: 10 }
+            Repeater {
+                model: [["Space", "Play or pause"],
+                        ["Ctrl+→  Ctrl+←", "Next or previous track"],
+                        ["Shift+→  Shift+←", "Forward or back 10 seconds"],
+                        ["Ctrl+↑  Ctrl+↓", "Volume up or down"],
+                        ["Ctrl+M", "Mute"],
+                        ["Ctrl+S", "Shuffle"],
+                        ["Ctrl+R", "Repeat"],
+                        ["Ctrl+.", "Stop after this track"],
+                        ["Ctrl+F", "Search"],
+                        ["Esc", "Back"]]
+                delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Label { text: modelData[0]; color: theme.text; font.pixelSize: 12
+                            font.family: "monospace"; Layout.preferredWidth: 150 }
+                    Label { text: modelData[1]; color: theme.textDim; font.pixelSize: 12
+                            Layout.fillWidth: true }
+                }
+            }
             }
         }
     }
