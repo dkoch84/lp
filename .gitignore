@@ -6,6 +6,7 @@ __pycache__/
 .claude/
 config.yml
 .lastfm_session
+.lastfm_queue.json
 dev_out/
 test_records/
 lp/cache/

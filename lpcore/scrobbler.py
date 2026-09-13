@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import threading
@@ -10,6 +11,10 @@ except ImportError:
 MIN_TRACK_LENGTH = 30
 MIN_SCROBBLE_PERCENT = 0.5
 MIN_SCROBBLE_SECONDS = 240
+# Last.fm accepts scrobbles up to 14 days old, 50 per request.
+MAX_QUEUED_AGE = 14 * 24 * 3600
+BATCH = 50
+MAX_QUEUED = 5000
 
 
 class Scrobbler:
@@ -31,6 +36,11 @@ class Scrobbler:
         self._session_key_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), '..', '.lastfm_session'
         )
+        # Scrobbles that couldn't be sent (offline, Last.fm down), kept to retry.
+        self._queue_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '.lastfm_queue.json'
+        )
+        self._queue_lock = threading.Lock()
 
         self._restore_session()
         self._attach_events()
@@ -73,6 +83,7 @@ class Scrobbler:
                         )
                         self.username = username
                         print(f"Last.fm: restored session for {username}")
+                        self._flush_in_background()
         except Exception as e:
             print(f"Last.fm: failed to restore session: {e}")
 
@@ -102,6 +113,7 @@ class Scrobbler:
                 f.write(f"{session_key}\n{username}\n")
 
             print(f"Last.fm: authenticated as {username}")
+            self._flush_in_background()
             return True, None
         except Exception as e:
             print(f"Last.fm: auth failed: {e}")
@@ -160,21 +172,82 @@ class Scrobbler:
         """Submit scrobble in background thread."""
         if not self.authenticated or not self.enabled:
             return
+        threading.Thread(target=self._submit_scrobble, args=(track,), daemon=True).start()
 
-        def _submit():
-            try:
-                self.network.scrobble(
-                    artist=track['artist'],
-                    title=track['title'],
-                    timestamp=int(track['start_time']),
-                    album=track.get('album') or '',
-                    duration=int(track['duration']),
-                )
-                print(f"Last.fm: scrobbled {track['artist']} - {track['title']}")
-            except Exception as e:
-                print(f"Last.fm: scrobble failed: {e}")
+    def _submit_scrobble(self, track):
+        """Send one scrobble. If it can't be sent it goes into the queue; once one
+        gets through, whatever was queued is sent too."""
+        entry = {
+            'artist': track['artist'],
+            'title': track['title'],
+            'timestamp': int(track['start_time']),
+            'album': track.get('album') or '',
+            'duration': int(track['duration']),
+        }
+        try:
+            self.network.scrobble(**entry)
+            print(f"Last.fm: scrobbled {track['artist']} - {track['title']}")
+        except Exception as e:
+            print(f"Last.fm: scrobble failed, kept to retry: {e}")
+            self._enqueue(entry)
+            return
+        self.flush_queue()
 
-        threading.Thread(target=_submit, daemon=True).start()
+    # --- the offline queue ---
+
+    def _load_queue(self):
+        try:
+            with open(self._queue_path) as f:
+                entries = json.load(f)
+        except (OSError, ValueError):
+            return []
+        cutoff = time.time() - MAX_QUEUED_AGE
+        return [e for e in entries if isinstance(e, dict) and e.get('timestamp', 0) >= cutoff]
+
+    def _save_queue(self, entries):
+        try:
+            tmp = self._queue_path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(entries[-MAX_QUEUED:], f)
+            os.replace(tmp, self._queue_path)
+        except OSError as e:
+            print(f"Last.fm: could not save the scrobble queue: {e}")
+
+    def _enqueue(self, entry):
+        with self._queue_lock:
+            entries = self._load_queue()
+            entries.append(entry)
+            self._save_queue(entries)
+
+    def pending_scrobbles(self):
+        """How many scrobbles are waiting to be sent."""
+        with self._queue_lock:
+            return len(self._load_queue())
+
+    def flush_queue(self):
+        """Send queued scrobbles in batches, oldest first. Stops at the first
+        failure and keeps the rest. Returns how many were sent."""
+        if not self.authenticated or not self.enabled:
+            return 0
+        sent = 0
+        with self._queue_lock:
+            entries = self._load_queue()
+            while entries:
+                batch = entries[:BATCH]
+                try:
+                    self.network.scrobble_many(batch)
+                except Exception as e:
+                    print(f"Last.fm: queued scrobbles still can't be sent: {e}")
+                    break
+                entries = entries[BATCH:]
+                sent += len(batch)
+                self._save_queue(entries)
+        if sent:
+            print(f"Last.fm: sent {sent} queued scrobble(s)")
+        return sent
+
+    def _flush_in_background(self):
+        threading.Thread(target=self.flush_queue, daemon=True).start()
 
     def _do_now_playing(self, track):
         """Send now-playing update in background thread."""
@@ -258,4 +331,5 @@ class Scrobbler:
             'enabled': self.enabled,
             'username': self.username,
             'pylast_available': pylast is not None,
+            'queued': self.pending_scrobbles(),
         }
