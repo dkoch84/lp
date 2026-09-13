@@ -64,6 +64,11 @@ class PlayerBackend:
         self._pending_start = None
         # file path -> tags; the now-playing status is read many times a second
         self._meta_cache = {}
+        # pause at the start of the next track instead of playing on
+        self.stop_after_current = False
+        # (index, path) of the last track that couldn't be played
+        self.last_error = None
+        self._consecutive_errors = 0
 
         # --- equalizer (live, runtime-settable) ---
         self._eq = None
@@ -93,12 +98,14 @@ class PlayerBackend:
         if pem:
             pem.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_track_end)
             pem.event_attach(vlc.EventType.MediaPlayerPlaying, self._on_playing)
+            pem.event_attach(vlc.EventType.MediaPlayerEncounteredError, self._on_error)
 
     def _on_playing(self, event):
         """Apply a session's resume offset and pause once VLC has actually
         started the track. Replaces fixed timers, which fired too early on slow
         storage and were silently ignored."""
         with self._lock:
+            self._consecutive_errors = 0
             pending, self._pending_start = self._pending_start, None
         if not pending:
             return
@@ -156,6 +163,53 @@ class PlayerBackend:
             log.info("advance -> track %d/%d (%s)%s", idx + 1, total, title,
                      f"  boundary gap {gap:+.0f}ms" if gap is not None else "")
             self._fire(fire)
+            # Stop after this track: only when the track ran out on its own (it
+            # just ended), not when someone skipped. Pause at the next track's start.
+            natural = self._last_end_t is not None and time.monotonic() - self._last_end_t < 2.0
+            if self.stop_after_current and natural:
+                self.stop_after_current = False
+                threading.Thread(target=self._pause_active_at_start, daemon=True).start()
+
+    def _on_error(self, event):
+        """A track couldn't be played (missing, unreadable, share unmounted).
+        VLC's list player stops dead on this, so move on to the next track and
+        tell listeners which one failed."""
+        with self._lock:
+            if self._loading or not self._playing:
+                return
+            idx = self.current_song_index
+            n = len(self.album)
+            path = self.album[idx] if 0 <= idx < n else None
+            self._consecutive_errors += 1
+            give_up = self._consecutive_errors >= max(1, n)
+            nxt = self._next_index(idx, n)
+            crossfading = self._xf_ms > 0
+        self.last_error = (idx, path)
+        log.warning("could not play track %d: %s", idx + 1, path)
+        self._fire('track_error')
+        if crossfading:
+            return                     # the crossfade monitor sees the error state
+        # libVLC must not be called back from inside its own event callback.
+        if give_up or nxt is None:
+            threading.Thread(target=self._end_after_errors, daemon=True).start()
+        else:
+            threading.Thread(target=self._list_player.play_item_at_index, args=(nxt,),
+                             daemon=True).start()
+
+    def _end_after_errors(self):
+        with self._lock:
+            self._playing = False
+        self._fire('album_end')
+
+    def _pause_active_at_start(self):
+        act = self._active()
+        try:
+            act.set_pause(1)
+            act.set_time(0)
+        except Exception as e:
+            log.warning("could not stop after the track: %s", e)
+        self._fire('paused')
+        self._fire('stopped_after')
 
     def _on_list_end(self, event):
         with self._lock:
@@ -238,6 +292,7 @@ class PlayerBackend:
             self._mrls = mrls
             self._last_end_t = None
             self._loading = False
+            self._consecutive_errors = 0
             start_idx = self.current_song_index
 
         ctx = os.path.basename(album_path.rstrip('/')) if album_path else f"{len(files)} tracks"
@@ -279,6 +334,15 @@ class PlayerBackend:
         self._list_player.next()
 
     def prev_track(self):
+        """Previous track, or back to the start of this one when it's more than
+        a few seconds in, as every player does."""
+        if self._playing and self.get_current_time() > 3.0:
+            try:
+                self._active().set_time(0)
+            except Exception:
+                pass
+            self._fire('seeked')
+            return
         if self._xf_ms > 0 and self._playing:
             with self._lock:
                 prv = max(0, self.current_song_index - 1)
@@ -374,6 +438,7 @@ class PlayerBackend:
                     self._pending_start = ((offset_ms / 1000.0, False, self._active())
                                            if offset_ms > 0 else None)
                 self._xf_jump(idx)
+            self._fire('seeked')
             return
         if idx == cur:
             self.player.set_time(offset_ms)
@@ -382,10 +447,12 @@ class PlayerBackend:
                 self._pending_start = ((offset_ms / 1000.0, False, self.player)
                                        if offset_ms > 0 else None)
             self._list_player.play_item_at_index(idx)
+        self._fire('seeked')
 
     def seek_track(self, seconds):
         """Set the position within the *current track* (MPRIS SetPosition)."""
         self._active().set_time(max(0, int(seconds * 1000)))
+        self._fire('seeked')
 
     # --- equalizer (live, runtime-settable) ---
 
@@ -477,6 +544,7 @@ class PlayerBackend:
             em = self._player_b.event_manager()
             if em:
                 em.event_attach(vlc.EventType.MediaPlayerPlaying, self._on_playing)
+                em.event_attach(vlc.EventType.MediaPlayerEncounteredError, self._on_error)
             if self._eq is not None:
                 try:
                     self._player_b.set_equalizer(self._eq)
@@ -563,19 +631,25 @@ class PlayerBackend:
                 t = act.get_time()
             except Exception:
                 continue
-            if state == vlc.State.Ended:
-                if self._repeat_mode == 'one':
+            if state in (vlc.State.Ended, vlc.State.Error):
+                errored = state == vlc.State.Error
+                if self._repeat_mode == 'one' and not errored:
                     self._restart_current()
                     continue
-                nxt = self._next_index(idx, n)
+                with self._lock:
+                    give_up = errored and self._consecutive_errors >= max(1, n)
+                nxt = None if give_up else self._next_index(idx, n)
                 if nxt is None:
                     with self._lock:
                         self._playing = False
                     self._fire('album_end')
                     return
                 self._hard_advance(nxt)
+                if self.stop_after_current and not errored:
+                    self.stop_after_current = False
+                    self._pause_active_at_start()
                 continue
-            if length <= 0 or t < 0 or self._repeat_mode == 'one':
+            if length <= 0 or t < 0 or self._repeat_mode == 'one' or self.stop_after_current:
                 continue
             if (length - t) <= self._xf_ms:
                 nxt = self._next_index(idx, n)
@@ -731,6 +805,180 @@ class PlayerBackend:
             return
         self._list_player.play_item_at_index(idx)   # NextItemSet updates the index
 
+    # --- editing the queue ---
+    # VLC's list player takes live edits to the items after the one playing
+    # without missing a beat, but loses its place when anything at or before the
+    # playing item changes (it keeps a stale position, so next/previous land on
+    # the wrong track). So edits after the playing track are made live, and the
+    # rest reload the queue at the same spot.
+
+    def _recompute_boundaries(self):
+        """Refresh boundaries and total from track_durations (hold the lock)."""
+        self.track_boundaries, cum = [], 0.0
+        for d in self.track_durations:
+            self.track_boundaries.append(cum)
+            cum += d
+        self.album_duration = cum
+
+    def _reload_at(self, files, durations, index):
+        """Reload the queue and carry on with the track now at `index`, at the
+        same position and paused if playback was paused."""
+        offset = self.get_current_time()
+        paused = not self.is_actively_playing()
+        with self._lock:
+            album_path = self.album_path
+            stop_after = self.stop_after_current
+        self.play_tracks(files, album_path=album_path, start=index, paused=paused,
+                         start_offset=offset, durations=durations)
+        self.stop_after_current = stop_after
+
+    def remove_track(self, idx):
+        """Remove queued track `idx`."""
+        with self._lock:
+            n = len(self.album)
+            cur = self.current_song_index
+            playing = self._playing
+            crossfading = self._xf_ms > 0
+            ml = self._media_list
+        if not 0 <= idx < n:
+            return
+        if n == 1:
+            self.clear_queue()
+            return
+        if crossfading or not playing or ml is None:
+            with self._lock:
+                self.album.pop(idx)
+                self.track_durations.pop(idx)
+                if idx < len(self._mrls):
+                    self._mrls.pop(idx)
+                if idx < cur or (idx == cur and cur >= len(self.album)):
+                    self.current_song_index = max(0, cur - 1)
+                self._recompute_boundaries()
+                new_cur = self.current_song_index
+            if crossfading and playing and idx == cur:
+                self._xf_jump(new_cur)
+            self._fire('queue_change')
+            return
+        if idx > cur:
+            ml.lock()
+            try:
+                ml.remove_index(idx)
+            finally:
+                ml.unlock()
+            with self._lock:
+                self.album.pop(idx)
+                self._mrls.pop(idx)
+                self.track_durations.pop(idx)
+                self._recompute_boundaries()
+            self._fire('queue_change')
+            return
+        files, durations = list(self.album), list(self.track_durations)
+        files.pop(idx)
+        durations.pop(idx)
+        if idx < cur:
+            self._reload_at(files, durations, cur - 1)
+        else:                                   # the playing track: carry on with the next
+            with self._lock:
+                self._pending_start = None
+            nxt = min(cur, len(files) - 1)
+            paused = not self.is_actively_playing()
+            with self._lock:
+                album_path = self.album_path
+            self.play_tracks(files, album_path=album_path, start=nxt, paused=paused,
+                             durations=durations)
+
+    def move_track(self, src, dst):
+        """Move queued track `src` to position `dst`."""
+        with self._lock:
+            n = len(self.album)
+            cur = self.current_song_index
+            playing = self._playing
+            crossfading = self._xf_ms > 0
+            ml = self._media_list
+        if not (0 <= src < n and 0 <= dst < n) or src == dst:
+            return
+        files, durations = list(self.album), list(self.track_durations)
+        moved, moved_d = files.pop(src), durations.pop(src)
+        files.insert(dst, moved)
+        durations.insert(dst, moved_d)
+        if src == cur:
+            new_cur = dst
+        elif src < cur <= dst:
+            new_cur = cur - 1
+        elif dst <= cur < src:
+            new_cur = cur + 1
+        else:
+            new_cur = cur
+        if crossfading or not playing or ml is None:
+            with self._lock:
+                self.album[:] = files
+                self.track_durations[:] = durations
+                self.current_song_index = new_cur
+                self._recompute_boundaries()
+            self._fire('queue_change')
+            return
+        if src > cur and dst > cur:
+            ml.lock()
+            try:
+                ml.remove_index(src)
+                m = self._instance.media_new(moved)
+                if dst >= ml.count():
+                    ml.add_media(m)
+                else:
+                    ml.insert_media(m, dst)
+            finally:
+                ml.unlock()
+            with self._lock:
+                self._mrls.pop(src)
+                self._mrls.insert(dst, m.get_mrl())
+                self.album[:] = files
+                self.track_durations[:] = durations
+                self._recompute_boundaries()
+            self._fire('queue_change')
+            return
+        self._reload_at(files, durations, new_cur)
+
+    def replace_upcoming(self, files, durations=None):
+        """Replace every track after the playing one (a shuffle, or undoing one)
+        without interrupting playback."""
+        new_durations = self._durations_for(files, durations)
+        with self._lock:
+            cur = self.current_song_index
+            ml = None if self._xf_ms > 0 or not self._playing else self._media_list
+        new_mrls = []
+        if ml is not None:
+            ml.lock()
+            try:
+                for i in range(ml.count() - 1, cur, -1):
+                    ml.remove_index(i)
+                for f in files:
+                    m = self._instance.media_new(f)
+                    ml.add_media(m)
+                    new_mrls.append(m.get_mrl())
+            finally:
+                ml.unlock()
+        with self._lock:
+            self.album[cur + 1:] = list(files)
+            self.track_durations[cur + 1:] = new_durations
+            if ml is not None:
+                self._mrls[cur + 1:] = new_mrls
+            self._recompute_boundaries()
+        self._fire('queue_change')
+
+    def clear_queue(self):
+        """Stop playback and empty the queue."""
+        self.stop()
+        with self._lock:
+            self.album = []
+            self._mrls = []
+            self.track_durations = []
+            self.track_boundaries = []
+            self.album_duration = 0.0
+            self.current_song_index = 0
+            self._media_list = None
+            self.stop_after_current = False
+        self._fire('queue_change')
+
     def _get_file_duration(self, file_path):
         try:
             lower = file_path.lower()
@@ -812,11 +1060,11 @@ class PlayerBackend:
             return None
 
     def get_current_time(self):
-        t = self.player.get_time()
+        t = self._active().get_time()
         return max(t / 1000.0, 0.0)
 
     def get_total_time(self):
-        t = self.player.get_length()
+        t = self._active().get_length()
         return max(t / 1000.0, 0.0)
 
     def get_album_progress(self):
