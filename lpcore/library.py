@@ -1,12 +1,21 @@
 import os
 import re
-import glob
 from dataclasses import dataclass, field
 
-from lpcore.tracks import AUDIO_EXTENSIONS, album_track_names, is_audio  # noqa: F401
+from lpcore.covers import find_cover
+from lpcore.tracks import (AUDIO_EXTENSIONS, album_track_names, album_track_paths,  # noqa: F401
+                           is_audio, natural_key)
 
-COVER_PATTERNS = ['cover.[jp][np]g', 'Cover.[jp][np]g', 'folder.[jp][np]g', 'Folder.[jp][np]g']
 YEAR_RE = re.compile(r'^(\d{4})\s*[-–—]\s*(.+)$')
+
+
+def parse_album_folder(folder_name):
+    """(year, display name) for an album folder: "1996 - Title" gives
+    ("1996", "Title"); a folder without a leading year gives ("", folder)."""
+    m = YEAR_RE.match(folder_name)
+    if m:
+        return m.group(1), m.group(2).strip()
+    return '', folder_name
 
 
 @dataclass
@@ -57,12 +66,19 @@ class Library:
                 if not os.path.isdir(album_path):
                     continue
 
-                track_count = sum(1 for f in os.listdir(album_path) if is_audio(f))
+                try:
+                    entries = os.listdir(album_path)
+                except OSError:
+                    continue
+                track_names = sorted((f for f in entries if is_audio(f)), key=natural_key)
+                track_count = len(track_names)
                 if track_count == 0:
                     continue
 
                 year, display_name = self._parse_folder_name(album_folder)
-                cover_path = self._find_cover(album_path)
+                cover_path = find_cover(
+                    album_path, [os.path.join(album_path, n) for n in track_names[:2]],
+                    names=entries)
 
                 album = Album(
                     artist=artist_name,
@@ -90,18 +106,10 @@ class Library:
         print(f"Library: {len(self.artists)} artists, {len(self.albums_by_path)} albums")
 
     def _parse_folder_name(self, folder_name):
-        m = YEAR_RE.match(folder_name)
-        if m:
-            return m.group(1), m.group(2).strip()
-        return '', folder_name
+        return parse_album_folder(folder_name)
 
     def _find_cover(self, album_path):
-        escaped = glob.escape(album_path)
-        for pattern in COVER_PATTERNS:
-            matches = glob.glob(os.path.join(escaped, pattern), recursive=False)
-            if matches:
-                return matches[0]
-        return None
+        return find_cover(album_path, album_track_paths(album_path)[:2])
 
     def get_artists(self):
         return sorted(self.artists.values(), key=lambda a: a.name.lower())

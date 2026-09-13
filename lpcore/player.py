@@ -1,6 +1,5 @@
 import vlc
 import os
-import glob
 import logging
 import threading
 import time
@@ -9,6 +8,7 @@ from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 
+from lpcore.covers import find_cover
 from lpcore.tracks import AUDIO_EXTENSIONS, album_track_paths  # noqa: F401
 
 log = logging.getLogger("lp.player")
@@ -64,6 +64,9 @@ class PlayerBackend:
         self._pending_start = None
         # file path -> tags; the now-playing status is read many times a second
         self._meta_cache = {}
+        # album folder -> (cover path, when looked up); now-playing art is asked
+        # for constantly, and the folder rarely changes while an album plays
+        self._art_cache = {}
         # pause at the start of the next track instead of playing on
         self.stop_after_current = False
         # (index, path) of the last track that couldn't be played
@@ -1001,14 +1004,21 @@ class PlayerBackend:
         return self.find_album_art(path), self.get_song_metadata(path)
 
     def find_album_art(self, music_file_path):
-        directory = os.path.dirname(music_file_path) if os.path.isfile(music_file_path) else music_file_path
-        escaped = glob.escape(directory)
-        patterns = ['cover.[jp][np]g', 'Cover.[jp][np]g', 'folder.[jp][np]g', 'Folder.[jp][np]g']
-        for pattern in patterns:
-            matches = glob.glob(os.path.join(escaped, pattern), recursive=False)
-            if matches:
-                return matches[0]
-        return None
+        """The cover for a track or an album folder: a picture in the folder, or
+        art embedded in the tracks (see lpcore.covers). Remembered for a few
+        seconds per folder."""
+        is_file = os.path.isfile(music_file_path)
+        directory = os.path.dirname(music_file_path) if is_file else music_file_path
+        now = time.monotonic()
+        cached = self._art_cache.get(directory)
+        if cached and now - cached[1] < 10.0:
+            return cached[0]
+        tracks = [music_file_path] if is_file else album_track_paths(directory)[:2]
+        art = find_cover(directory, tracks)
+        if len(self._art_cache) > 256:
+            self._art_cache.clear()
+        self._art_cache[directory] = (art, now)
+        return art
 
     def get_song_metadata(self, file_path):
         """Tags for `file_path`, read once and cached. The status behind the
