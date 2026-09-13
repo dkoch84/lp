@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS play_history (
     played_at REAL NOT NULL DEFAULT 0
 );
 
+-- Smart playlists you define: `rules` is a lpdeck.smart definition as JSON.
+CREATE TABLE IF NOT EXISTS smart_playlists (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    rules      TEXT NOT NULL,
+    created_at REAL NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_album  ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
@@ -337,3 +345,44 @@ def genres(con):
 def genre_tracks(con, genre, limit=1000):
     return _track_rows(con, "t.genre = ?", (genre,),
                        "ar.sort_name, al.year, t.track_no", limit)
+
+
+# --- smart playlists you define ---
+
+def create_smart_playlist(con, name, definition):
+    from . import smart
+    cur = con.execute("INSERT INTO smart_playlists(name, rules, created_at) VALUES (?,?,?)",
+                      (name, json.dumps(smart.normalize(definition)), time.time()))
+    con.commit()
+    return cur.lastrowid
+
+
+def update_smart_playlist(con, smart_id, name, definition):
+    from . import smart
+    con.execute("UPDATE smart_playlists SET name=?, rules=? WHERE id=?",
+                (name, json.dumps(smart.normalize(definition)), smart_id))
+    con.commit()
+
+
+def delete_smart_playlist(con, smart_id):
+    con.execute("DELETE FROM smart_playlists WHERE id=?", (smart_id,))
+    con.commit()
+
+
+def smart_playlists(con):
+    """[{'id', 'name', 'definition'}] in name order."""
+    return [{"id": r["id"], "name": r["name"], "definition": json.loads(r["rules"])}
+            for r in con.execute("SELECT id, name, rules FROM smart_playlists ORDER BY name COLLATE NOCASE")]
+
+
+def smart_playlist_tracks(con, smart_id, now=None):
+    from . import smart
+    row = con.execute("SELECT rules FROM smart_playlists WHERE id=?", (smart_id,)).fetchone()
+    if not row:
+        return []
+    where, params, order, limit = smart.build_query(json.loads(row["rules"]), now)
+    return _track_rows(con, where, params, order, limit)
+
+
+def all_tracks(con, order="ar.sort_name, al.year, al.name, t.disc_no, t.track_no", limit=100000):
+    return _track_rows(con, "1=1", (), order, limit)
