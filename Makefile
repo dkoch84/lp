@@ -2,7 +2,7 @@ PY := .venv/bin/python
 RUFF := .venv/bin/ruff
 SRC := lpcore lp lpdeck lpstudio main.py dev_spin.py gen_release_icon.py tests
 
-.PHONY: help check lint test fix run deck shot shot-kiosk gammaray studio
+.PHONY: help check lint test fix run deck shot shot-kiosk gammaray studio prerender
 
 check: lint test          ## lint + tests (run before pushing)
 
@@ -27,6 +27,9 @@ studio:                   ## launch lp-studio (the vinyl-style authoring tool)
 shot:                     ## headless screenshot of lp-deck → /tmp/lpdeck.png (ARGS=...)
 	$(PY) -m lpdeck.shot /tmp/lpdeck.png --play $(ARGS)
 	@echo "wrote /tmp/lpdeck.png"
+
+prerender:                ## render missing vinyl style images (ONLY=name, FORCE=1 for all)
+	$(PY) -m lpcore.vinyl.prerender $(foreach n,$(ONLY),--only $(n)) $(if $(FORCE),--force,)
 
 shot-kiosk:               ## headless screenshot of the lp kiosk → /tmp/lp.png (ARGS=...)
 	$(PY) -m lp.shot /tmp/lp.png $(ARGS)

@@ -12,8 +12,10 @@ import pygame.gfxdraw
 
 from lpcore.vinyl.settings import VinylSettings
 from lpcore.vinyl.catalog import (
-    CLEAR_GROOVE_COLORS, DARK_BG, DECOR_EMOJI, INNER_GROOVE, LABEL_COLORS, LABEL_RADIUS, MUNAFO_GROOVE_COLORS, OUTER_GROOVE, RECORD_SUPERSAMPLE, VINYL_BLACK, VINYL_COLORS, VINYL_GROOVE_COLORS, VINYL_LABEL, VINYL_LABEL_DARK)
+    AUTO_DARK_BODY_GROOVE, AUTO_LIGHT_BODY_GROOVE, CLEAR_GROOVE_COLOR, DARK_BG, DECOR_EMOJI,
+    GROOVE_AUTO_LUMA_SPLIT, GROOVE_SHADOW, GROOVE_SHINE, INNER_GROOVE, LABEL_COLORS, LABEL_RADIUS, MUNAFO_GROOVE_COLORS, OUTER_GROOVE, VINYL_BLACK, VINYL_COLORS, VINYL_GROOVE_COLORS, VINYL_LABEL, VINYL_LABEL_DARK)
 from lpcore.vinyl.cache import CACHE_DIR, JULIA_CACHE_DIR, MUNAFO_CACHE_DIR, NEBULA_CACHE_DIR
+from lpcore.vinyl.effects import apply_effects
 from lpcore.vinyl.fractals import (
     _pick_vinyl_style, _render_mandelbrot_surface, _render_munafo_surface, _render_nebula_surface)
 
@@ -26,6 +28,13 @@ def _resolve_color(val, fallback):
         except ValueError:
             pass
     return tuple(fallback[:3])
+
+
+def _auto_colour_groove(rgb):
+    """Auto grooves for a body colour with no table entry: dark haze on a light
+    body, light shine on a dark one."""
+    luma = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+    return AUTO_LIGHT_BODY_GROOVE if luma > GROOVE_AUTO_LUMA_SPLIT else AUTO_DARK_BODY_GROOVE
 
 
 class VinylRenderer:
@@ -312,7 +321,7 @@ class VinylRenderer:
         elif style_type == 'clear':
             self._draw_clear_vinyl(surf, size, center)
         elif style_type == 'color':
-            base = VINYL_COLORS.get(style.get('color'), VINYL_BLACK[0])
+            base = VINYL_COLORS.get(style.get('color'), VINYL_BLACK)
             self._draw_color_vinyl(surf, size, center, base)
         elif style_type == 'mandelbrot':
             variant = style['variant']
@@ -337,6 +346,11 @@ class VinylRenderer:
                 self._draw_black_vinyl(surf, size, center)
         else:
             self._draw_black_vinyl(surf, size, center)
+
+        # Vinyl Effects finish the plastic before the label goes on. Clear vinyl
+        # has its own lighting, so it takes none.
+        if self.settings.effects and style_type != 'clear':
+            apply_effects(surf, self.settings.effects)
 
         # Label — album art, colored, fractal, or fallback. Skip entirely
         # for picture-disc styles ('picture' = album art disc, 'pattern' =
@@ -433,7 +447,11 @@ class VinylRenderer:
         Returns (surface, blend_mode) where blend_mode is 'blend' (normal alpha)
         for a darkening haze on light vinyls, or 'add' for an additive shine on
         patterned and dark vinyls. Shine renders consistently regardless of
-        whatever the body texture is underneath — additive light always brightens.
+        whatever the body texture is underneath: additive light always brightens.
+
+        The settings' groove treatment picks the result: 'auto' keeps the
+        style's own grooves below, 'shine' and 'shadow' force one look on any
+        style, and 'smooth' draws no groove bands at all.
         """
         d = size * 2
         surf = pygame.Surface((d, d), pygame.SRCALPHA)
@@ -449,11 +467,12 @@ class VinylRenderer:
         if style_type == 'clear':
             # Bright body — additive shine makes grooves read as highlights
             # catching the light, not as washed-out haze.
-            overlay_c = CLEAR_GROOVE_COLORS[0]
+            overlay_c = CLEAR_GROOVE_COLOR
             blend_mode = 'add'
         elif style_type == 'color':
-            overlay_c = VINYL_GROOVE_COLORS.get(
-                style.get('color', ''), ((0, 0, 0, 28), None))[0]
+            color = style.get('color', '')
+            overlay_c = VINYL_GROOVE_COLORS.get(color) or _auto_colour_groove(
+                VINYL_COLORS.get(color, VINYL_BLACK))
             # Dark bodies get a light shine (additive); light bodies get a
             # dark haze (normal alpha blend).
             if overlay_c and overlay_c[0] > 128:  # light overlay color
@@ -465,7 +484,7 @@ class VinylRenderer:
         elif style_type == 'munafo':
             variant = style.get('variant')
             cfg_name = variant[0] if variant else None
-            overlay_c = MUNAFO_GROOVE_COLORS.get(cfg_name, ((0, 0, 0, 30), None))[0]
+            overlay_c = MUNAFO_GROOVE_COLORS.get(cfg_name, (0, 0, 0, 30))
             blend_mode = 'add' if overlay_c[0] > 128 else 'blend'
         elif style_type == 'pattern':
             # Inherit groove behavior from the underlying fractal type.
@@ -474,7 +493,7 @@ class VinylRenderer:
             if sub_type == 'munafo':
                 variant = sub.get('variant')
                 cfg_name = variant[0] if variant else None
-                overlay_c = MUNAFO_GROOVE_COLORS.get(cfg_name, ((0, 0, 0, 30), None))[0]
+                overlay_c = MUNAFO_GROOVE_COLORS.get(cfg_name, (0, 0, 0, 30))
                 blend_mode = 'add' if overlay_c[0] > 128 else 'blend'
             else:
                 overlay_c = (255, 255, 255, 45)
@@ -482,6 +501,14 @@ class VinylRenderer:
         elif style_type in ('mandelbrot', 'nebula', 'picture'):
             overlay_c = (255, 255, 255, 45)
             blend_mode = 'add'
+
+        treatment = self.settings.grooves
+        if treatment == 'shine':
+            overlay_c, blend_mode = GROOVE_SHINE, 'add'
+        elif treatment == 'shadow':
+            overlay_c, blend_mode = GROOVE_SHADOW, 'blend'
+        elif treatment == 'smooth':
+            overlay_c, blend_mode = None, 'blend'
 
         if overlay_c is not None:
             self._draw_music_zones(surf, size, center, overlay_c,
@@ -578,42 +605,6 @@ class VinylRenderer:
         return surf
 
     @staticmethod
-    def _draw_specular_highlight(surf, size, center, color, highlight_angle=-np.pi * 0.35):
-        """Render a single angular specular highlight — a soft bright crescent
-        on one side of the disc, suggesting overhead light reflection.
-        """
-        d = size * 2
-        cx = d // 2
-        cy = d // 2
-
-        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
-        dx = px - cx
-        dy = py - cy
-        r = np.sqrt(dx * dx + dy * dy)
-        theta = np.arctan2(dy, dx)
-
-        # Soft-edged disc mask.
-        in_disc = np.clip(size - r + 0.5, 0.0, 1.0)
-
-        # Angular intensity: smooth crescent peaking at highlight_angle.
-        phase = np.cos(theta - highlight_angle)
-        angular = np.maximum(phase, 0.0) ** 2
-
-        alpha_frac = in_disc * angular
-
-        alpha_val = color[3] if len(color) == 4 else 255
-        alpha = (alpha_frac * alpha_val).astype(np.uint8)
-
-        rgba = np.empty((d, d, 4), dtype=np.uint8)
-        rgba[..., 0] = color[0]
-        rgba[..., 1] = color[1]
-        rgba[..., 2] = color[2]
-        rgba[..., 3] = alpha
-
-        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
-        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
-
-    @staticmethod
     def _draw_music_zones(surf, size, center, color, boundaries=None,
                           album_dur=None, gap_half_width=2):
         """Render the music-groove zones as a hazy color overlay with track gaps."""
@@ -653,70 +644,9 @@ class VinylRenderer:
         overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
         surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
 
-    @staticmethod
-    def _draw_grooves(surf, size, center, color, spacing=3, ss_factor=None,
-                      boundaries=None, album_dur=None, gap_half_width=2):
-        """Draw the record's groove as a single continuous spiral, with subpixel AA.
-
-        Real LP grooves are a spiral. Rotation has a visible effect. `spacing`
-        is the spiral pitch (radial advance per turn) at display resolution.
-
-        At each track boundary, the spiral is suppressed in a small radial band:
-        on a real LP these are flat (musicless) lead-in grooves between tracks,
-        which read visually as the boundary marker.
-        """
-        if ss_factor is None:
-            ss_factor = RECORD_SUPERSAMPLE
-        d = size * 2
-        pitch = spacing * ss_factor
-        r_inner = size * INNER_GROOVE
-        r_outer = size * OUTER_GROOVE
-        cx = d // 2
-        cy = d // 2
-
-        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
-        dx = px - cx
-        dy = py - cy
-        r = np.sqrt(dx * dx + dy * dy)
-        theta = np.arctan2(dy, dx)
-
-        in_band = (r >= r_inner) & (r <= r_outer)
-
-        # Radial distance to nearest spiral arm.
-        spiral_phase = (2 * np.pi / pitch) * r
-        diff = np.mod(theta - spiral_phase, 2 * np.pi)
-        mod_phase = np.minimum(diff, 2 * np.pi - diff)
-        radial_dist = mod_phase * pitch / (2 * np.pi)
-
-        # 1-display-px stroke = ss_factor surface px.
-        half_stroke = ss_factor / 2.0
-        alpha_frac = np.clip(half_stroke + 0.5 - radial_dist, 0.0, 1.0)
-
-        # Suppress the spiral inside each track-boundary gap.
-        if boundaries and album_dur and album_dur > 0:
-            groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
-            gap_half = gap_half_width * ss_factor
-            for b in boundaries[1:]:
-                frac = b / album_dur
-                r_boundary = size * OUTER_GROOVE - frac * groove_range
-                in_gap = np.abs(r - r_boundary) < gap_half
-                alpha_frac = np.where(in_gap, 0.0, alpha_frac)
-
-        alpha_val = color[3] if len(color) == 4 else 255
-        alpha = (in_band * alpha_frac * alpha_val).astype(np.uint8)
-
-        rgba = np.empty((d, d, 4), dtype=np.uint8)
-        rgba[..., 0] = color[0]
-        rgba[..., 1] = color[1]
-        rgba[..., 2] = color[2]
-        rgba[..., 3] = alpha
-
-        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
-        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
-
     def _draw_black_vinyl(self, surf, size, center):
         """Draw a plain black vinyl base disc (grooves go on the overlay)."""
-        base, _, _ = VINYL_BLACK
+        base = VINYL_BLACK
         pygame.draw.circle(surf, base, center, size)
 
     # Colored-vinyl body. Flat fill reads dull, so we brighten the pigment and
@@ -893,51 +823,6 @@ class VinylRenderer:
         rgba[..., 1] = np.clip(g_arr, 0, 255).astype(np.uint8)
         rgba[..., 2] = np.clip(b_arr, 0, 255).astype(np.uint8)
         rgba[..., 3] = np.clip(alpha, 0, 255).astype(np.uint8)
-
-        overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
-        surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)
-
-    def _draw_track_marks(self, surf, size, center, color, boundaries, album_dur, ss_factor=None):
-        """Draw track boundary rings at album track positions, with subpixel AA.
-
-        Track marks remain concentric circles (one per track) — they're not part
-        of the spiral, they mark where one track ends and the next begins.
-        Each ring is 1 display pixel wide.
-        """
-        if not (album_dur > 0 and boundaries):
-            return
-        if ss_factor is None:
-            ss_factor = RECORD_SUPERSAMPLE
-
-        d = size * 2
-        groove_range = (OUTER_GROOVE - INNER_GROOVE) * size
-        cx = d // 2
-        cy = d // 2
-
-        py, px = np.mgrid[0:d, 0:d].astype(np.float32)
-        dx = px - cx
-        dy = py - cy
-        r = np.sqrt(dx * dx + dy * dy)
-
-        # 2-display-px stroke (visibly heavier than the 1-px spiral, but
-        # not "huge"). half_stroke=0.5 + the +0.5 in the formula = 2px wide.
-        ring_half_stroke = ss_factor * 0.5
-
-        alpha_frac = np.zeros_like(r)
-        for b in boundaries[1:]:
-            frac = b / album_dur
-            r_ring = size * OUTER_GROOVE - frac * groove_range
-            ring_alpha = np.clip(ring_half_stroke - np.abs(r - r_ring) + 0.5, 0.0, 1.0)
-            alpha_frac = np.maximum(alpha_frac, ring_alpha)
-
-        alpha_val = color[3] if len(color) == 4 else 255
-        alpha = (alpha_frac * alpha_val).astype(np.uint8)
-
-        rgba = np.empty((d, d, 4), dtype=np.uint8)
-        rgba[..., 0] = color[0]
-        rgba[..., 1] = color[1]
-        rgba[..., 2] = color[2]
-        rgba[..., 3] = alpha
 
         overlay = pygame.image.frombuffer(rgba.tobytes(), (d, d), 'RGBA').copy()
         surf.blit(overlay, (0, 0), special_flags=pygame.BLEND_ALPHA_SDL2)

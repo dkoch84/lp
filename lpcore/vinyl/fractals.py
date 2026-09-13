@@ -183,6 +183,232 @@ def _clouds_palette(cloud, sky):
 
     return fn
 
+# Defaults for the layered-smoke renderer (lp-studio's "smoke" family). A variant
+# overrides any of them with a dict as its 8th tuple element.
+SMOKE_MAX_LAYERS = 12
+SMOKE_LAYER_PARAMS = dict(
+    layers=6,              # overlapping smoke layers, each pointing its own way
+    opacity=0.60,          # darkness of one layer's densest smoke
+    amount=0.22,           # how much of the field turns to smoke (vein threshold)
+    gamma=1.6,             # falloff from a wisp's core to its edge
+    soft=2,                # edge softening as a resolution divisor; 1 = none
+    stretch=(1.6, 3.2),    # per-layer elongation along its direction, min and max
+    warp_oct=5, arm_oct=6, # the marble field's warp and detail octaves
+    deep_soft=1,           # alternate layers softened as if deeper; 1 = off
+    deep_opacity=0.5,      # and dimmed by this factor
+    veil_soft=1,           # softening of the lighter body veil; 1 = none
+    light=(68, 150, 140), mid=(48, 112, 104), ink=(16, 40, 34),
+    opacity_variation=1.0, # how much layer darkness varies around `opacity`; 0 = all equal
+    spread=1.0,            # how widely layer directions fan out; 0 = all one way
+    rotate=0.0,            # degrees added to every layer's direction
+    # Per-layer trims, index 0 = the first layer. The defaults leave each layer
+    # exactly as generated; layers past the end of a tuple are untrimmed.
+    layer_opacity=(1.0,) * SMOKE_MAX_LAYERS,   # multiplies that layer's opacity
+    layer_amount=(1.0,) * SMOKE_MAX_LAYERS,    # multiplies how much of it is smoke
+    layer_stretch=(1.0,) * SMOKE_MAX_LAYERS,   # multiplies its stretch
+    layer_angle=(0.0,) * SMOKE_MAX_LAYERS,     # degrees added to its direction
+    layer_soft=(0,) * SMOKE_MAX_LAYERS,        # extra softening on top of the global
+    # Dark accents: a few extra, darker layers laid over the finished smoke from
+    # their own random stream, so adding them never moves the layers above.
+    # accents=0 switches the pass off entirely.
+    accents=0,
+    accent_seed=0,               # picks a different set of accents
+    accent_amount=0.12,          # how much of each accent layer is dark; low = thin threads
+    accent_opacity=0.85,
+    accent_gamma=1.6,
+    accent_soft=1,               # 1 = sharp, higher = soft dark clouds
+    accent_stretch=(2.0, 4.0),
+    accent_follow=0.6,           # 0 = anywhere, 1 = only where smoke already is
+    accent_ink=(6, 18, 15),
+    # Smoke shadow: the smoke casts a soft shadow on the plastic beneath it,
+    # darkening the clear areas next to it. 0 switches it off.
+    shadow=0.0,
+    shadow_soft=12,              # how far the shadow spreads (1 = hard)
+)
+
+
+def _soften_field(field, factor):
+    """Resolution-relative softening: shrink by `factor`, scale back up."""
+    factor = int(factor)
+    if factor <= 1:
+        return field
+    d = field.shape[0]
+    surf = pygame.Surface((d, d))
+    grey = np.clip(field * 255.0, 0, 255).astype(np.uint8)
+    pygame.surfarray.blit_array(surf, np.dstack([grey.T] * 3))
+    small = max(1, d // factor)
+    surf = pygame.transform.smoothscale(pygame.transform.smoothscale(surf, (small, small)), (d, d))
+    return pygame.surfarray.array3d(surf)[..., 0].T.astype(np.float64) / 255.0
+
+
+# Optional memo for _marble_blend. Computing these fields is nearly all of a
+# smoke render, yet most tuning (colours, opacity, amount, softness) reuses the
+# same fields, so lp-studio's render worker turns this on and those changes
+# become near-instant. It stays off by default: the kiosk renders each style
+# once, and holding full-size fields would only cost it memory.
+_FIELD_CACHE = None          # OrderedDict of key -> read-only field, when enabled
+_FIELD_CACHE_LIMIT = 0
+_FIELD_CACHE_BYTES = 0
+
+
+def enable_field_cache(max_bytes=384 * 2**20):
+    """Keep recently computed smoke fields, up to `max_bytes`, oldest evicted first."""
+    global _FIELD_CACHE, _FIELD_CACHE_LIMIT, _FIELD_CACHE_BYTES
+    from collections import OrderedDict
+    if _FIELD_CACHE is None:
+        _FIELD_CACHE, _FIELD_CACHE_BYTES = OrderedDict(), 0
+    _FIELD_CACHE_LIMIT = int(max_bytes)
+
+
+def disable_field_cache():
+    global _FIELD_CACHE, _FIELD_CACHE_LIMIT, _FIELD_CACHE_BYTES
+    _FIELD_CACHE, _FIELD_CACHE_LIMIT, _FIELD_CACHE_BYTES = None, 0, 0
+
+
+def _marble_blend(seed, size, px, py, angle_deg, stretch, warp_oct, arm_oct, offset):
+    """The marble (nebula swirl) field with its two-armed swirl off, sampled on
+    coordinates rotated to `angle_deg` and stretched along that direction, so one
+    layer's wisps all lean one way."""
+    global _FIELD_CACHE_BYTES
+    if _FIELD_CACHE is None:
+        return _marble_blend_compute(seed, size, px, py, angle_deg, stretch, warp_oct, arm_oct, offset)
+    # px/py are always the full mgrid for `size`, so size stands in for them.
+    key = (seed, size, float(angle_deg), float(stretch), warp_oct, arm_oct, float(offset))
+    field = _FIELD_CACHE.get(key)
+    if field is not None:
+        _FIELD_CACHE.move_to_end(key)
+        return field
+    field = _marble_blend_compute(seed, size, px, py, angle_deg, stretch, warp_oct, arm_oct, offset)
+    field.flags.writeable = False     # shared between renders: nobody may edit it in place
+    _FIELD_CACHE[key] = field
+    _FIELD_CACHE_BYTES += field.nbytes
+    while _FIELD_CACHE_BYTES > _FIELD_CACHE_LIMIT and len(_FIELD_CACHE) > 1:
+        _old_key, old = _FIELD_CACHE.popitem(last=False)
+        _FIELD_CACHE_BYTES -= old.nbytes
+    return field
+
+
+def _marble_blend_compute(seed, size, px, py, angle_deg, stretch, warp_oct, arm_oct, offset):
+    grids = _make_nebula_grids(seed)
+    dx = px - size
+    dy = py - size
+    a = np.deg2rad(angle_deg)
+    xr = (dx * np.cos(a) + dy * np.sin(a)) / stretch
+    yr = -dx * np.sin(a) + dy * np.cos(a)
+    nx = (xr + size) / size * 3.0 + offset
+    ny = (yr + size) / size * 3.0 + offset * 0.6
+    wx = nx + _fbm(nx + 1.7, ny + 9.2, warp_oct, 0, grids) * 3.0
+    wy = ny + _fbm(nx + 8.3, ny + 2.8, warp_oct, 2, grids) * 3.0
+    wx2 = wx + _fbm(wx * 0.8 + 3.1, wy * 0.8 + 7.7, max(warp_oct - 1, 2), 4, grids) * 2.0
+    wy2 = wy + _fbm(wx * 0.8 + 1.3, wy * 0.8 + 4.9, max(warp_oct - 1, 2), 6, grids) * 2.0
+    arm = _fbm(wx2, wy2, arm_oct, 1, grids)
+    return _smoothstep(np.clip((arm - 0.3) * 2.5, 0.0, 1.0))
+
+
+def _render_smoke_layers_surface(variant, size):
+    """Translucent vinyl with smoke running in every direction.
+
+    Several layers of the marble field, each with its own seed, direction and
+    stretch, are stacked by transmittance: every layer lets through a share of
+    the light, so where wisps cross the smoke gets darker, as it does in a real
+    smoke pressing. Alternate layers can be softened and dimmed to sit deeper in
+    the plastic. The body underneath is a lighter veil from one more field.
+    """
+    seed = variant[0]
+    P = {**SMOKE_LAYER_PARAMS, **(variant[7] if len(variant) > 7 else {})}
+    rng = np.random.default_rng(seed)
+    n_layers = max(1, int(P['layers']))
+    angles = rng.uniform(0, 180, n_layers)
+    d = size * 2
+    py, px = np.mgrid[0:d, 0:d].astype(np.float64)
+    lo, hi = P['stretch']
+    amount = max(float(P['amount']), 1e-3)
+    warp_oct, arm_oct = int(P['warp_oct']), int(P['arm_oct'])
+
+    def trim(key, i, untouched):
+        seq = P[key]
+        return seq[i] if i < len(seq) else untouched
+
+    spread, rotate = float(P['spread']), float(P['rotate'])
+    variation = float(P['opacity_variation'])
+    transmit = np.ones((d, d))
+    for i in range(n_layers):
+        # The random draws happen in the same order whatever the trims are, so
+        # changing one layer never reshuffles the others. The global transforms
+        # are only applied when moved off their defaults, which keeps an
+        # untouched style byte-identical to before they existed.
+        angle = angles[i]
+        if spread != 1.0 or rotate != 0.0:
+            angle = 90.0 + (angle - 90.0) * spread + rotate
+        angle = angle + trim('layer_angle', i, 0.0)
+        stretch = rng.uniform(lo, hi) * trim('layer_stretch', i, 1.0)
+        layer_amount = max(amount * trim('layer_amount', i, 1.0), 1e-3)
+        blend = _marble_blend(seed + 13 * i, size, px, py, angle, stretch,
+                              warp_oct, arm_oct, i * 4.1)
+        dens = np.clip((layer_amount - blend) / layer_amount, 0.0, 1.0) ** P['gamma']
+        wobble = rng.uniform(0.75, 1.15)
+        if variation != 1.0:
+            wobble = 1.0 + (wobble - 1.0) * variation
+        opacity = P['opacity'] * wobble * trim('layer_opacity', i, 1.0)
+        extra_soft = int(trim('layer_soft', i, 0))
+        if int(P['deep_soft']) > 1 and i % 2:
+            dens = _soften_field(dens, int(P['deep_soft']) + extra_soft)
+            opacity *= P['deep_opacity']
+        else:
+            dens = _soften_field(dens, int(P['soft']) + extra_soft)
+        transmit *= 1.0 - np.clip(opacity * dens, 0.0, 1.0)
+
+    veil = _marble_blend(seed + 997, size, px, py, rng.uniform(0, 180), 1.5,
+                         warp_oct, arm_oct, 33.0)
+    veil = _soften_field(veil, P['veil_soft'])
+    light, mid, ink = [np.asarray(c, dtype=np.float64) for c in (P['light'], P['mid'], P['ink'])]
+    body = mid[None, None, :] + (light - mid)[None, None, :] * veil[..., None]
+    smoke = (1.0 - transmit)[..., None]
+    col = body * (1.0 - smoke) + ink[None, None, :] * smoke
+
+    if float(P['shadow']) > 0.0:
+        cover = smoke[..., 0]
+        cast = _soften_field(cover, int(P['shadow_soft']))
+        col = col * (1.0 - float(P['shadow']) * cast * (1.0 - cover))[..., None]
+
+    if int(P['accents']) > 0:
+        col = _apply_dark_accents(col, smoke[..., 0], P, seed, size, px, py, warp_oct, arm_oct)
+
+    r = np.hypot(px + 0.5 - size, py + 0.5 - size) / size
+    alpha = np.clip((1.0 - r) * size + 0.5, 0.0, 1.0)
+    rgba = np.dstack([np.clip(col, 0, 255), alpha * 255]).astype(np.uint8)
+    return pygame.image.frombuffer(np.ascontiguousarray(rgba).tobytes(), (d, d), 'RGBA').copy()
+
+
+def _apply_dark_accents(col, smoke, P, seed, size, px, py, warp_oct, arm_oct):
+    """Lay darker smoke over a finished layered-smoke body.
+
+    Accent layers are marble fields like the main layers, but drawn from their
+    own generator, darkened towards ``accent_ink``, and optionally kept to
+    where smoke already is (``accent_follow``) so they deepen the existing
+    wisps instead of starting new ones in clear plastic.
+    """
+    arng = np.random.default_rng([seed, 7771, int(P['accent_seed'])])
+    lo, hi = sorted(P['accent_stretch'])
+    amount = max(float(P['accent_amount']), 1e-3)
+    transmit = np.ones_like(smoke)
+    for j in range(int(P['accents'])):
+        blend = _marble_blend(seed + 5003 + 13 * j + 101 * int(P['accent_seed']), size, px, py,
+                              arng.uniform(0, 180), arng.uniform(lo, hi),
+                              warp_oct, arm_oct, 57.0 + j * 4.1)
+        dens = np.clip((amount - blend) / amount, 0.0, 1.0) ** P['accent_gamma']
+        dens = _soften_field(dens, int(P['accent_soft']))
+        opacity = P['accent_opacity'] * arng.uniform(0.8, 1.1)
+        transmit *= 1.0 - np.clip(opacity * dens, 0.0, 1.0)
+    acc = 1.0 - transmit
+    follow = float(np.clip(P['accent_follow'], 0.0, 1.0))
+    if follow > 0.0:
+        where = smoke / max(float(smoke.max()), 1e-6)
+        acc = acc * ((1.0 - follow) + follow * where)
+    ink = np.asarray(P['accent_ink'], dtype=np.float64)
+    return col * (1.0 - acc[..., None]) + ink[None, None, :] * acc[..., None]
+
+
 # Modulator fields a parameterized nebula channel can ride on. Each maps the
 # renderer's noise fields (t1/t2/t3, hue-shift hs) — plus two derived forms — to
 # a [0,1]-ish array. 'sin' is the shimmering banded modulator (0.5+0.5·sin).
@@ -399,6 +625,17 @@ NEBULA_VARIANTS = [
     (52, _clouds_palette((224, 196, 226), (168, 170, 214)), 'plum-wine',     1.2, 6, 7, 'clouds'),
     (64, _clouds_palette((222, 240, 248), (150, 192, 224)), 'arctic',        1.2, 6, 7, 'clouds'),
     (88, _nebula_marble,         'marble',         1.2, 6, 7),
+    # Tuned in lp-studio's smoke family. Per-layer trims are all at their
+    # no-change defaults, so they are left out.
+    (100, None, 'teal-marble', 1.0, 5, 6, 'layers', dict(
+        layers=4, opacity=0.39, amount=0.43, gamma=2.0, soft=2, stretch=(2.0, 2.4),
+        warp_oct=5, arm_oct=5, deep_soft=1, deep_opacity=0.5, veil_soft=1,
+        light=(68, 150, 140), mid=(48, 112, 104), ink=(16, 40, 34),
+        opacity_variation=1.0, spread=1.0, rotate=0.0,
+        accents=3, accent_seed=349, accent_amount=0.11, accent_opacity=1.0, accent_gamma=1.6,
+        accent_soft=3, accent_stretch=(2.0, 3.0), accent_follow=1.0, accent_ink=(14, 14, 10),
+        shadow=0.0, shadow_soft=12,
+    )),
     (42, _nebula_galaxy,         'galaxy',         1.6, 6, 7),
     (71, _nebula_galaxy_warm,    'galaxy-warm',    1.5, 6, 7),
     (23, _nebula_galaxy_cold,    'galaxy-cold',    1.5, 6, 7),
@@ -472,6 +709,8 @@ def _render_nebula_surface(variant, size):
     # nebula look (7th tuple element == 'clouds').
     if len(variant) > 6 and variant[6] == 'clouds':
         return _render_clouds_surface(variant, size)
+    if len(variant) > 6 and variant[6] == 'layers':
+        return _render_smoke_layers_surface(variant, size)
     grids = _make_nebula_grids(seed)
 
     d = size * 2
@@ -543,7 +782,7 @@ def _render_mandelbrot_surface(variant, size):
     """Render a mandelbrot fractal disc. Vectorized escape-time over the full grid."""
     cx_m, cy_m, zoom, max_iter, _name, color_key = variant
     scheme = MANDELBROT_COLORS.get(color_key, MANDELBROT_COLORS['purple'])
-    base_dark, r_p, g_p, b_p, _groove, _track = scheme
+    base_dark, r_p, g_p, b_p = scheme
 
     d = size * 2
     sm = max(size // 2, 40)

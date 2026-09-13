@@ -56,10 +56,10 @@ INNER_GROOVE = 0.35
 
 LABEL_RADIUS = 0.30
 
-# Vinyl base style: (base_color, groove_color, track_mark_color)
-VINYL_BLACK = ((40, 40, 40), (46, 46, 46), (58, 58, 58))
+# Black vinyl body colour.
+VINYL_BLACK = (40, 40, 40)
 
-# Colored vinyl variants — same structure as VINYL_BLACK
+# Coloured vinyl body colours, as rgb.
 VINYL_COLORS = {
     'red':          (130, 35, 35),
     'navy':         (40, 50, 120),
@@ -87,79 +87,55 @@ VINYL_COLORS = {
     'sea-foam':     (124, 147, 133),
 }
 
-# Per-variant groove + track-mark appearance — (groove_rgba, track_rgba).
-# Dark body → light groove (highlight), light body → dark groove (shadow).
-# Track alpha is roughly 2× groove alpha so boundaries are visible but not huge.
-# Tune these to taste per vinyl style.
+# Groove haze colour per vinyl colour, as rgba. Dark bodies get a light
+# additive shine, light bodies a dark shadow (see build_grooves_overlay).
 VINYL_GROOVE_COLORS = {
     # Light bodies — dark shadow haze (subtle)
-    'cream':      ((0, 0, 0, 7),        (0, 0, 0, 28)),
-    'mono':       ((0, 0, 0, 4),        (0, 0, 0, 28)),
-    'fire':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'gold':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'ocean':      ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'emerald':    ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'lavender':   ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'purple':     ((0, 0, 0, 10),       (0, 0, 0, 40)),
-    'rose':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'copper':     ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'rust':       ((0, 0, 0, 10),       (0, 0, 0, 40)),
-    'cyan':       ((0, 0, 0, 9),        (0, 0, 0, 36)),
-    'sea-foam':   ((0, 0, 0, 8),        (0, 0, 0, 32)),   # mid-light body — subtle shadow grooves
+    'cream':      (0, 0, 0, 7),
+    'mono':       (0, 0, 0, 4),
+    'fire':       (0, 0, 0, 9),
+    'gold':       (0, 0, 0, 9),
+    'ocean':      (0, 0, 0, 9),
+    'emerald':    (0, 0, 0, 9),
+    'lavender':   (0, 0, 0, 9),
+    'purple':     (0, 0, 0, 10),
+    'rose':       (0, 0, 0, 9),
+    'copper':     (0, 0, 0, 9),
+    'rust':       (0, 0, 0, 10),
+    'cyan':       (0, 0, 0, 9),
+    'sea-foam':   (0, 0, 0, 8),   # mid-light body — subtle shadow grooves
     # Dark bodies — light additive shine
-    'red':        ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'navy':       ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'forest':     ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'plum':       ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'chocolate':  ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'slate':      ((255, 255, 255, 25), (255, 255, 255, 36)),
-    'amber':      ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'teal':       ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'burgundy':   ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'olive':      ((255, 255, 255, 35), (255, 255, 255, 45)),
-    'midnight':   ((255, 255, 255, 35), (255, 255, 255, 45)),
+    'red':        (255, 255, 255, 35),
+    'navy':       (255, 255, 255, 35),
+    'forest':     (255, 255, 255, 35),
+    'plum':       (255, 255, 255, 35),
+    'chocolate':  (255, 255, 255, 35),
+    'slate':      (255, 255, 255, 25),
+    'amber':      (255, 255, 255, 35),
+    'teal':       (255, 255, 255, 35),
+    'burgundy':   (255, 255, 255, 35),
+    'olive':      (255, 255, 255, 35),
+    'midnight':   (255, 255, 255, 35),
 }
 
-# Plain black vinyl: light grooves (light catching the spiral) on a dark body.
-BLACK_GROOVE_COLORS = ((90, 90, 90, 80), (110, 110, 110, 130))
+# Clear vinyl's groove haze, as rgba (additive).
+CLEAR_GROOVE_COLOR = (255, 255, 255, 55)
 
-# Transparent / clear vinyl.
-CLEAR_GROOVE_COLORS = ((255, 255, 255, 55), (255, 255, 255, 90))
-
-# Picture disc (uses album art as the entire face).
-PICTURE_GROOVE_COLORS = ((0, 0, 0, 12), (0, 0, 0, 26))
-
-# Mandelbrot color schemes: (interior, r_params, g_params, b_params, groove, track_mark)
+# Mandelbrot color schemes: (interior, r_params, g_params, b_params)
 # Each channel: (base, amplitude, frequency, phase)
 MANDELBROT_COLORS = {
-    'purple':    ((15, 5, 30),   (40, 180, 12.0, 0.0), (20, 80, 8.0, 2.0), (80, 175, 10.0, 4.0),    (30, 20, 60),  (50, 35, 85)),
-    'fire':      ((30, 5, 0),    (80, 175, 10.0, 0.0), (20, 160, 8.0, 1.5), (5, 40, 6.0, 3.0),      (50, 25, 10),  (70, 40, 20)),
-    'ocean':     ((5, 10, 30),   (10, 60, 6.0, 1.0),  (40, 140, 8.0, 0.5), (60, 195, 10.0, 0.0),    (15, 30, 55),  (25, 45, 75)),
-    'emerald':   ((5, 20, 10),   (20, 80, 8.0, 2.0),  (50, 180, 10.0, 0.0), (15, 70, 6.0, 1.5),     (15, 40, 20),  (25, 60, 35)),
-    'gold':      ((25, 15, 5),   (80, 175, 10.0, 0.0), (50, 150, 9.0, 0.5), (10, 50, 6.0, 2.0),     (50, 40, 15),  (70, 55, 25)),
-    'mono':      ((10, 10, 10),  (30, 225, 10.0, 0.0), (30, 225, 10.0, 0.0), (30, 225, 10.0, 0.0),   (35, 35, 35),  (55, 55, 55)),
-    'copper':    ((25, 12, 5),   (60, 150, 9.0, 0.5),  (30, 100, 7.0, 1.0), (10, 60, 5.0, 2.5),     (45, 30, 15),  (65, 45, 25)),
-    'teal':      ((5, 15, 20),   (10, 50, 6.0, 1.5),  (40, 150, 9.0, 0.0), (50, 160, 8.0, 0.5),     (15, 35, 45),  (25, 50, 60)),
-    'rose':      ((25, 8, 15),   (60, 140, 8.0, 0.0),  (20, 70, 6.0, 2.0), (40, 120, 9.0, 1.0),     (45, 25, 35),  (65, 40, 50)),
-    'rust':      ((30, 8, 5),    (70, 140, 8.0, 0.0),  (25, 80, 6.0, 1.0), (10, 45, 5.0, 2.5),      (50, 25, 15),  (70, 40, 25)),
-    'lavender':  ((18, 10, 25),  (50, 130, 10.0, 1.0), (30, 90, 7.0, 2.5), (60, 160, 9.0, 0.0),     (35, 25, 50),  (50, 35, 70)),
-    'midnight':  ((5, 5, 20),    (15, 60, 7.0, 2.0),  (10, 50, 6.0, 1.0), (40, 170, 10.0, 0.0),     (15, 15, 40),  (25, 25, 55)),
-}
-
-# Per-mandelbrot-color-scheme groove + track. Keyed on the color name.
-MANDELBROT_GROOVE_COLORS = {
-    'purple':    ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'fire':      ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'ocean':     ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'emerald':   ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'gold':      ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'mono':      ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'copper':    ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'teal':      ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'rose':      ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'rust':      ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'lavender':  ((0, 0, 0, 32), (0, 0, 0, 60)),
-    'midnight':  ((255, 255, 255, 22), (255, 255, 255, 45)),
+    'purple':    ((15, 5, 30),   (40, 180, 12.0, 0.0), (20, 80, 8.0, 2.0), (80, 175, 10.0, 4.0)),
+    'fire':      ((30, 5, 0),    (80, 175, 10.0, 0.0), (20, 160, 8.0, 1.5), (5, 40, 6.0, 3.0)),
+    'ocean':     ((5, 10, 30),   (10, 60, 6.0, 1.0),  (40, 140, 8.0, 0.5), (60, 195, 10.0, 0.0)),
+    'emerald':   ((5, 20, 10),   (20, 80, 8.0, 2.0),  (50, 180, 10.0, 0.0), (15, 70, 6.0, 1.5)),
+    'gold':      ((25, 15, 5),   (80, 175, 10.0, 0.0), (50, 150, 9.0, 0.5), (10, 50, 6.0, 2.0)),
+    'mono':      ((10, 10, 10),  (30, 225, 10.0, 0.0), (30, 225, 10.0, 0.0), (30, 225, 10.0, 0.0)),
+    'copper':    ((25, 12, 5),   (60, 150, 9.0, 0.5),  (30, 100, 7.0, 1.0), (10, 60, 5.0, 2.5)),
+    'teal':      ((5, 15, 20),   (10, 50, 6.0, 1.5),  (40, 150, 9.0, 0.0), (50, 160, 8.0, 0.5)),
+    'rose':      ((25, 8, 15),   (60, 140, 8.0, 0.0),  (20, 70, 6.0, 2.0), (40, 120, 9.0, 1.0)),
+    'rust':      ((30, 8, 5),    (70, 140, 8.0, 0.0),  (25, 80, 6.0, 1.0), (10, 45, 5.0, 2.5)),
+    'lavender':  ((18, 10, 25),  (50, 130, 10.0, 1.0), (30, 90, 7.0, 2.5), (60, 160, 9.0, 0.0)),
+    'midnight':  ((5, 5, 20),    (15, 60, 7.0, 2.0),  (10, 50, 6.0, 1.0), (40, 170, 10.0, 0.0)),
 }
 
 # Mandelbrot zoom locations: (cx, cy, zoom, max_iter, name)
@@ -190,15 +166,14 @@ MUNAFO_VARIANTS = [
     ('deep7_v1', 'munafo-deep7', 'Magenta Flower'),   # coral + magenta + teal
 ]
 
-# Per-munafo-variant groove + track-mark colors. Keyed on config name.
-# Tuned to each palette's dominant field — dark grooves (normal alpha) on
-# light fields read as shadow; light grooves (additive) on dark fields read
-# as shine. Brightness >128 in the color triggers additive blending in
-# _build_grooves_overlay.
+# Groove haze colour per munafo variant, as rgba, keyed on config name.
+# Dark grooves (normal alpha) on light fields read as shadow; light grooves
+# (additive) on dark fields read as shine. A red channel above 128 switches
+# build_grooves_overlay to additive blending.
 MUNAFO_GROOVE_COLORS = {
-    'deep5_v1': ((0, 0, 0, 32), (0, 0, 0, 60)),   # peach field — dark grooves
-    'deep6_v1': ((0, 0, 0, 30), (0, 0, 0, 56)),   # bright yellow outer — dark
-    'deep7_v1': ((0, 0, 0, 28), (0, 0, 0, 52)),   # magenta/coral mid — dark
+    'deep5_v1': (0, 0, 0, 32),   # peach field — dark grooves
+    'deep6_v1': (0, 0, 0, 30),   # bright yellow outer — dark
+    'deep7_v1': (0, 0, 0, 28),   # magenta/coral mid — dark
 }
 
 # Style weights
@@ -230,40 +205,35 @@ PRERENDER_SIZE = 800
 # is built separately at SS=1 (display resolution) to avoid moiré entirely.
 RECORD_SUPERSAMPLE = 2
 
-# Per-nebula-variant groove + track. Keyed on the variant name.
-NEBULA_GROOVE_COLORS = {
-    'purple-fire':    ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'ocean-emerald':  ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'crimson-gold':   ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'electric':       ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'emerald-purple': ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'deep-emerald':   ((0, 0, 0, 28), (0, 0, 0, 52)),
-    'cream-green':    ((0, 0, 0, 22), (0, 0, 0, 44)),
-    'bone':           ((0, 0, 0, 18), (0, 0, 0, 36)),
-    'cream-rose':     ((0, 0, 0, 22), (0, 0, 0, 44)),
-    'diamond-morning':((0, 0, 0, 16), (0, 0, 0, 32)),
-    'sunset-peach':   ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'lavender-dusk':  ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'mint-sky':       ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'rose-gold':      ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'storm-grey':     ((0, 0, 0, 18), (0, 0, 0, 36)),
-    'cotton-candy':   ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'butter-cream':   ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'seafoam':        ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'ember-dusk':     ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'plum-wine':      ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'arctic':         ((0, 0, 0, 16), (0, 0, 0, 32)),
-    'marble':         ((0, 0, 0, 22), (0, 0, 0, 44)),
-    'galaxy':         ((255, 255, 255, 22), (255, 255, 255, 45)),
-    'galaxy-warm':    ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'galaxy-cold':    ((255, 255, 255, 22), (255, 255, 255, 45)),
-    'oil-spill':      ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'absinthe':       ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'coral-reef':     ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'bruise':         ((255, 255, 255, 22), (255, 255, 255, 45)),
-    'molten':         ((0, 0, 0, 30), (0, 0, 0, 56)),
-    'lava-lamp':      ((0, 0, 0, 30), (0, 0, 0, 56)),
-}
-
 # Background / spindle-hole colour (also lp.display window bg).
 DARK_BG = (17, 17, 17)
+
+
+# Vinyl Effects: finishes applied over any style (lpcore/vinyl/effects.py).
+# id -> display label, in the order they apply.
+VINYL_EFFECTS = {
+    'glass': 'Glass',
+    'deep-edge': 'Deep edge',
+    'rim-light': 'Rim light',
+}
+
+
+# Groove treatments: how the music-zone grooves catch the light, chosen per
+# record next to the Vinyl Effects. 'auto' keeps each style's own grooves.
+GROOVE_TREATMENTS = {
+    'auto': 'Auto',
+    'shine': 'Shine',
+    'shadow': 'Shadow',
+    'smooth': 'Smooth',
+}
+GROOVE_SHINE = (255, 255, 255, 45)     # additive
+GROOVE_SHADOW = (0, 0, 0, 30)          # normal alpha
+
+# Auto grooves for a colour with no VINYL_GROOVE_COLORS entry (a new or
+# user-made colour): bodies brighter than this luma (0-255) get a dark haze,
+# darker ones a light shine. 115 sits between the brightest built-in shine body
+# (amber, 100) and the darkest shadow body (rust, 131), so the rule agrees with
+# every entry in the table.
+GROOVE_AUTO_LUMA_SPLIT = 115
+AUTO_LIGHT_BODY_GROOVE = (0, 0, 0, 9)
+AUTO_DARK_BODY_GROOVE = (255, 255, 255, 35)

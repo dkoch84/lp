@@ -9,9 +9,9 @@ Style/label *validity* against the full variant catalog is still checked at the
 web-API layer for now — those big tables move into lpcore.vinyl with the
 renderer in the next step, after which validation consolidates here.
 """
-from dataclasses import dataclass, asdict, fields
+from dataclasses import dataclass, asdict, field, fields
 
-from .catalog import LABEL_TEXT_MODES, LABEL_TEXT_FONTS, DECOR_VALUES
+from .catalog import LABEL_TEXT_MODES, LABEL_TEXT_FONTS, DECOR_VALUES, GROOVE_TREATMENTS, VINYL_EFFECTS
 
 
 def valid_color(c):
@@ -32,6 +32,8 @@ class VinylSettings:
     decor1_color: str = 'auto'
     decor2: str = 'none'
     decor2_color: str = 'auto'
+    effects: list = field(default_factory=list)   # Vinyl Effects ids, see effects.py
+    grooves: str = 'auto'             # auto | shine | shadow | smooth
 
     def to_dict(self):
         return asdict(self)
@@ -52,6 +54,8 @@ class VinylSettings:
             if value is None:
                 continue
             self._validate(key, value)
+            if key == 'effects':
+                value = [e for e in VINYL_EFFECTS if e in value]    # canonical order, no repeats
             setattr(self, key, value)
         return self
 
@@ -72,4 +76,13 @@ class VinylSettings:
         elif key in ('decor1', 'decor2'):
             if value not in DECOR_VALUES:
                 raise ValueError(f"{key} must be one of {DECOR_VALUES}")
+        elif key == 'effects':
+            if isinstance(value, str) or not isinstance(value, (list, tuple)):
+                raise ValueError(f"effects must be a list of {list(VINYL_EFFECTS)}, got {value!r}")
+            unknown = [e for e in value if e not in VINYL_EFFECTS]
+            if unknown:
+                raise ValueError(f"unknown vinyl effects {unknown}; known: {list(VINYL_EFFECTS)}")
+        elif key == 'grooves':
+            if value not in GROOVE_TREATMENTS:
+                raise ValueError(f"grooves must be one of {list(GROOVE_TREATMENTS)}, got {value!r}")
         # style / label: caller validates against the full catalog (for now).
