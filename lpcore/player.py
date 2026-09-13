@@ -67,6 +67,12 @@ class PlayerBackend:
         # album folder -> (cover path, when looked up); now-playing art is asked
         # for constantly, and the folder rarely changes while an album plays
         self._art_cache = {}
+        # fade out before pausing and back in on resume (ms; 0 = off)
+        self.fade_ms = 0
+        self._fade_lock = threading.Lock()
+        self._fade_target = None     # True/False while a fade toward playing/paused runs
+        # chosen audio output device id (None = the system default)
+        self._output_device = None
         # pause at the start of the next track instead of playing on
         self.stop_after_current = False
         # (index, path) of the last track that couldn't be played
@@ -305,6 +311,7 @@ class PlayerBackend:
         with self._lock:
             self._pending_start = ((start_offset, paused, self.player)
                                    if start_offset > 0 or paused else None)
+        self._apply_output_device(self.player)
         if start_idx:
             self._list_player.play_item_at_index(start_idx)
         else:
@@ -357,6 +364,12 @@ class PlayerBackend:
         """Pause/resume the current track (VLC pause toggles). Fires 'paused' or
         'resumed', so listeners like the scrobbler can leave paused time out."""
         was_playing = self.is_actively_playing()
+        if self.fade_ms > 0:
+            if self._fade_target is not None:        # mid-fade: go by where it's heading
+                was_playing = self._fade_target
+            self._fade_to(not was_playing)
+            self._fire('paused' if was_playing else 'resumed')
+            return
         if self._xf_ms > 0:
             self._active().pause()
             if self._xf_fading and self._player_b is not None:
@@ -376,11 +389,102 @@ class PlayerBackend:
     def set_paused(self, paused):
         """Explicit pause (True) / resume (False) — for MPRIS Play/Pause, which
         are distinct verbs unlike the toggle the transport button uses."""
+        if self.fade_ms > 0:
+            playing = (self._fade_target if self._fade_target is not None
+                       else self.is_actively_playing())
+            if paused == (not playing):
+                return
+            self._fade_to(not paused)
+            self._fire('paused' if paused else 'resumed')
+            return
         if self._xf_ms > 0:
             self._active().set_pause(1 if paused else 0)
         else:
             self.player.set_pause(1 if paused else 0)
         self._fire('paused' if paused else 'resumed')
+
+    # --- fading on pause and resume ---
+
+    def _fade_players(self):
+        players = [self._active()]
+        if self._xf_fading and self._player_b is not None:
+            players.append(self._idle())
+        return players
+
+    def _ramp(self, players, start, end):
+        steps = max(1, int(self.fade_ms / 20))
+        for i in range(1, steps + 1):
+            level = int(round(start + (end - start) * i / steps))
+            for p in players:
+                try:
+                    p.audio_set_volume(level)
+                except Exception:
+                    pass
+            time.sleep(self.fade_ms / 1000.0 / steps)
+
+    def _fade_to(self, playing):
+        """Pause after fading out, or resume and fade back in, on a background
+        thread. The volume stays at 0 while paused and comes back on resume."""
+        self._fade_target = playing
+
+        def run():
+            with self._fade_lock:
+                players = self._fade_players()
+                master = self._xf_master_vol
+                try:
+                    if playing:
+                        for p in players:
+                            p.audio_set_volume(0)
+                            p.set_pause(0)
+                        self._ramp(players, 0, master)
+                    else:
+                        self._ramp(players, master, 0)
+                        for p in players:
+                            p.set_pause(1)
+                        for p in players:
+                            p.audio_set_volume(master)
+                except Exception as e:
+                    log.warning("fade failed: %s", e)
+                finally:
+                    if self._fade_target == playing:
+                        self._fade_target = None
+        threading.Thread(target=run, daemon=True).start()
+
+    # --- audio output device ---
+
+    def output_devices(self):
+        """[(device id, description)] offered by the audio output in use."""
+        devices = []
+        try:
+            head = self.player.audio_output_device_enum()
+            node = head
+            while node:
+                d = node.contents
+                devices.append((vlc.bytes_to_str(d.device), vlc.bytes_to_str(d.description)))
+                node = d.next
+            if head:
+                vlc.libvlc_audio_output_device_list_release(head)
+        except Exception as e:
+            log.warning("could not list audio devices: %s", e)
+        return devices
+
+    @property
+    def output_device(self):
+        return self._output_device
+
+    def set_output_device(self, device_id):
+        """Send audio to `device_id` (from output_devices), or the default for None."""
+        self._output_device = device_id or None
+        for p in (self.player, self._player_b):
+            self._apply_output_device(p)
+
+    def _apply_output_device(self, player):
+        if player is None or not self._output_device:
+            return
+        try:
+            player.audio_output_device_set(None, self._output_device)
+        except Exception as e:
+            log.warning("could not switch the audio device: %s", e)
 
     def is_actively_playing(self):
         """True only while audio is actually advancing (False when paused). The
@@ -548,6 +652,7 @@ class PlayerBackend:
             if em:
                 em.event_attach(vlc.EventType.MediaPlayerPlaying, self._on_playing)
                 em.event_attach(vlc.EventType.MediaPlayerEncounteredError, self._on_error)
+            self._apply_output_device(self._player_b)
             if self._eq is not None:
                 try:
                     self._player_b.set_equalizer(self._eq)
