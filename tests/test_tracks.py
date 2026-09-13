@@ -1,4 +1,4 @@
-"""Tests for lpcore.tracks — which files are an album's tracks, and their order.
+"""Tests for lpcore.tracks: which files are an album's tracks, and their order.
 
 The point: the library lists tracks and the player queues them, from separate
 readings of the same directory. Row N in the web UI is sent back as a start
@@ -7,7 +7,7 @@ membership OR order, the picker starts the wrong track. Both had drifted:
 
   * the library counted .mp3/.flac while the player queued eleven formats, so a
     single .m4a shifted every index after it;
-  * both sorted filenames as plain text, so an unpadded album ran 1, 10, 11, 2 —
+  * both sorted filenames as plain text, so an unpadded album ran 1, 10, 11, 2:
     not just displayed that way, PLAYED that way.
 
 So the ordering tests below matter, and the agreement tests at the bottom matter

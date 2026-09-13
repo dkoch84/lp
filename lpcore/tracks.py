@@ -10,7 +10,7 @@ in both directions at once, so this module exists to make that impossible:
   * MEMBERSHIP. The library counted only .mp3/.flac while the player queued
     eleven formats, so one .m4a in a folder shifted every index after it.
   * ORDER. Both sorted filenames as plain strings, which puts an unpadded
-    album in the order 1, 10, 11, 2, 3 — wrong in the listing, and wrong in
+    album in the order 1, 10, 11, 2, 3: wrong in the listing, and wrong in
     the actual playback order, which is the part that matters.
 """
 import os

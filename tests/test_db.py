@@ -1,4 +1,4 @@
-"""Tests for lpdeck.db — the SQLite library store.
+"""Tests for lpdeck.db: the SQLite library store.
 
 The point: db.py holds play history, favourites, ratings and playlists, so a
 regression here loses user data rather than mangling a pixel. The highest-risk

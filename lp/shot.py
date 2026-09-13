@@ -1,4 +1,4 @@
-"""Headless screenshot harness for the kiosk display — the lp-side twin of
+"""Headless screenshot harness for the kiosk display: the lp-side twin of
 `lpdeck.shot`.
 
 Renders the REAL `Display._render_playing` to a PNG with no display attached and

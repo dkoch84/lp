@@ -1,4 +1,4 @@
-"""Tests for lpdeck.meta — the Edit Metadata read/write path.
+"""Tests for lpdeck.meta: the Edit Metadata read/write path.
 
 The point: this is the only code in the project that WRITES to the user's music
 files, so a regression here corrupts a library rather than a view. It also has a

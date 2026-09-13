@@ -1,4 +1,4 @@
-"""Tests for lp.display.fit_text — the kiosk's text ellipsizer.
+"""Tests for lp.display.fit_text: the kiosk's text ellipsizer.
 
 The point: the kiosk metadata panel is fixed-width and read from across a room,
 and song titles are the one field that regularly outruns it. fit_text is what
