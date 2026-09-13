@@ -17,7 +17,13 @@ ColumnLayout {
     readonly property bool isInteger: spec.integer === true
 
     function fmt(v) {
-        return isInteger ? Math.round(v).toString() : (Math.round(v * 100) / 100).toString()
+        return isInteger ? Math.round(v).toString() : parseFloat(v.toFixed(3)).toString()
+    }
+
+    // One arrow-key nudge: the slider's step (1 for integers), x10 with Shift.
+    function nudge(event) {
+        var step = spec.step !== undefined ? spec.step : (isInteger ? 1 : 0.01)
+        return (event.modifiers & Qt.ShiftModifier) ? step * 10 : step
     }
 
     RowLayout {
@@ -29,12 +35,40 @@ ColumnLayout {
             font.pixelSize: 12
             Layout.fillWidth: true
         }
-        Label {
+        // The slider's value, typed exactly: Enter (or clicking away) applies it,
+        // Up/Down nudge by one step, Shift for ten.
+        TextField {
+            id: valueBox
+            objectName: "valueBox"
             visible: root.isSlider
-            text: root.fmt(slider.value)
+            Layout.preferredWidth: 70
+            horizontalAlignment: Text.AlignRight
             color: "#e6e6e6"
             font.pixelSize: 12
             font.family: "monospace"
+            selectByMouse: true
+            topPadding: 2
+            bottomPadding: 2
+            leftPadding: 4
+            rightPadding: 4
+            background: Rectangle {
+                color: valueBox.activeFocus ? "#262626" : "transparent"
+                border.color: valueBox.activeFocus ? "#6ea8ff" : "#333333"
+                radius: 3
+            }
+
+            function commit(v) {
+                if (!isNaN(v)) {
+                    v = Math.min(slider.to, Math.max(slider.from, v))
+                    studio.setParam(root.spec.key, root.isInteger ? Math.round(v) : v)
+                }
+                text = root.fmt(studio.param(root.spec.key))
+            }
+
+            Component.onCompleted: text = root.fmt(studio.param(root.spec.key))
+            onEditingFinished: commit(parseFloat(text))
+            Keys.onUpPressed: function(event) { commit(studio.param(root.spec.key) + root.nudge(event)) }
+            Keys.onDownPressed: function(event) { commit(studio.param(root.spec.key) - root.nudge(event)) }
         }
     }
 
@@ -68,6 +102,7 @@ ColumnLayout {
         stepSize: root.spec.step !== undefined ? root.spec.step : (root.isInteger ? 1 : 0)
         value: studio.param(root.spec.key)
         onMoved: studio.setParam(root.spec.key, value)
+        onValueChanged: if (!valueBox.activeFocus) valueBox.text = root.fmt(value)
         Connections {
             target: studio
             function onParamsChanged() { slider.value = studio.param(root.spec.key) }

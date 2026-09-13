@@ -5,7 +5,8 @@ renderer:
 
   * body   — ``VinylRenderer.build_record`` with the style forced onto the
              renderer's style cache (so any family renders the real way),
-  * grooves — ``_draw_music_zones`` with a live colour + blend mode,
+  * grooves: drawn by the same renderer code lp and lp-deck use, so the
+    preview matches what ships,
   * shine  — ``build_shine_overlay`` with instance-overridden shine params.
 
 Families:
@@ -17,10 +18,14 @@ Families:
                  so no catalog injection is needed,
   * clouds     — soft painterly clouds via ``_clouds_palette`` (a nebula
                  sub-type that routes to the clouds renderer),
+  * smoke      — translucent vinyl with overlapping smoke layers, each rotated
+                 and stretched its own way (the ``'layers'`` nebula route),
   * black / clear — built-in bodies.
 
 Nebula exposes a simplified control set (two colours + mode dropdowns) with an
 Advanced toggle that reveals the full per-channel amplitude + modulator matrix.
+Smoke uses the same toggle to reveal per-layer trims (opacity, amount, stretch,
+direction, softness) for every layer.
 """
 import json
 import os
@@ -30,7 +35,8 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from lpcore.vinyl import catalog, fractals
 from lpcore.vinyl.catalog import MANDELBROT_VARIANTS, MANDELBROT_ZOOMS
-from lpcore.vinyl.fractals import NEBULA_MODS, _clouds_palette, _nebula_palette
+from lpcore.vinyl.fractals import (NEBULA_MODS, SMOKE_LAYER_PARAMS, SMOKE_MAX_LAYERS,
+                                   _clouds_palette, _nebula_palette)
 from lpcore.vinyl.render import VinylRenderer
 from lpcore.vinyl.settings import VinylSettings
 
@@ -49,7 +55,7 @@ _STUDIO_BOUNDARIES = [sum(_STUDIO_TRACK_LENS[:i])
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
-FAMILIES = ["mandelbrot", "color", "nebula", "clouds", "black", "clear"]
+FAMILIES = ["mandelbrot", "color", "nebula", "clouds", "smoke", "black", "clear"]
 
 # Nebula choice enums (stored as integer indices in the param dict).
 BRIGHT_MODES = ["std", "galaxy", "pastel"]
@@ -86,22 +92,48 @@ DEFAULTS = {
     "cld_cloud_r": 253, "cld_cloud_g": 226, "cld_cloud_b": 233,
     "cld_sky_r": 156, "cld_sky_g": 210, "cld_sky_b": 238,
     "cld_sat": 1.25, "cld_seed": 28,
+    # smoke (defaults are the renderer's own, so a fresh smoke style starts as teal-marble)
+    "smk_seed": 101, "smk_layers": SMOKE_LAYER_PARAMS["layers"],
+    "smk_amount": SMOKE_LAYER_PARAMS["amount"], "smk_opacity": SMOKE_LAYER_PARAMS["opacity"],
+    "smk_gamma": SMOKE_LAYER_PARAMS["gamma"], "smk_soft": SMOKE_LAYER_PARAMS["soft"],
+    "smk_stretch_lo": SMOKE_LAYER_PARAMS["stretch"][0], "smk_stretch_hi": SMOKE_LAYER_PARAMS["stretch"][1],
+    "smk_warp": SMOKE_LAYER_PARAMS["warp_oct"], "smk_arm": SMOKE_LAYER_PARAMS["arm_oct"],
+    "smk_deep_soft": SMOKE_LAYER_PARAMS["deep_soft"], "smk_deep_op": SMOKE_LAYER_PARAMS["deep_opacity"],
+    "smk_veil_soft": SMOKE_LAYER_PARAMS["veil_soft"],
+    "smk_light_r": SMOKE_LAYER_PARAMS["light"][0], "smk_light_g": SMOKE_LAYER_PARAMS["light"][1],
+    "smk_light_b": SMOKE_LAYER_PARAMS["light"][2],
+    "smk_mid_r": SMOKE_LAYER_PARAMS["mid"][0], "smk_mid_g": SMOKE_LAYER_PARAMS["mid"][1],
+    "smk_mid_b": SMOKE_LAYER_PARAMS["mid"][2],
+    "smk_ink_r": SMOKE_LAYER_PARAMS["ink"][0], "smk_ink_g": SMOKE_LAYER_PARAMS["ink"][1],
+    "smk_ink_b": SMOKE_LAYER_PARAMS["ink"][2],
+    "smk_op_var": SMOKE_LAYER_PARAMS["opacity_variation"], "smk_spread": SMOKE_LAYER_PARAMS["spread"],
+    "smk_rotate": SMOKE_LAYER_PARAMS["rotate"],
+    "smk_shadow": SMOKE_LAYER_PARAMS["shadow"], "smk_shadow_soft": SMOKE_LAYER_PARAMS["shadow_soft"],
+    "smk_acc_count": SMOKE_LAYER_PARAMS["accents"], "smk_acc_seed": SMOKE_LAYER_PARAMS["accent_seed"],
+    "smk_acc_amount": SMOKE_LAYER_PARAMS["accent_amount"], "smk_acc_opacity": SMOKE_LAYER_PARAMS["accent_opacity"],
+    "smk_acc_gamma": SMOKE_LAYER_PARAMS["accent_gamma"], "smk_acc_soft": SMOKE_LAYER_PARAMS["accent_soft"],
+    "smk_acc_stretch_lo": SMOKE_LAYER_PARAMS["accent_stretch"][0],
+    "smk_acc_stretch_hi": SMOKE_LAYER_PARAMS["accent_stretch"][1],
+    "smk_acc_follow": SMOKE_LAYER_PARAMS["accent_follow"],
+    "smk_acc_ink_r": SMOKE_LAYER_PARAMS["accent_ink"][0], "smk_acc_ink_g": SMOKE_LAYER_PARAMS["accent_ink"][1],
+    "smk_acc_ink_b": SMOKE_LAYER_PARAMS["accent_ink"][2],
     # grooves
-    "grv_r": 255, "grv_g": 255, "grv_b": 255, "grv_a": 45, "grv_add": 1,
     # shine
     "shine_gloss": 0.70, "shine_angle": 15.0,
     "shine_core_w": 0.06, "shine_core_a": 0.28,
     "shine_halo_w": 0.16, "shine_halo_a": 0.10,
 }
 
-GROOVE_DEFAULTS = {
-    "mandelbrot": {"grv_r": 255, "grv_g": 255, "grv_b": 255, "grv_a": 45, "grv_add": 1},
-    "color":      {"grv_r": 0, "grv_g": 0, "grv_b": 0, "grv_a": 28, "grv_add": 0},
-    "nebula":     {"grv_r": 0, "grv_g": 0, "grv_b": 0, "grv_a": 30, "grv_add": 0},
-    "clouds":     {"grv_r": 0, "grv_g": 0, "grv_b": 0, "grv_a": 16, "grv_add": 0},
-    "black":      {"grv_r": 0, "grv_g": 0, "grv_b": 0, "grv_a": 25, "grv_add": 0},
-    "clear":      {"grv_r": 255, "grv_g": 255, "grv_b": 255, "grv_a": 55, "grv_add": 1},
-}
+# Per-layer smoke trims: smk_l<N>_<trim>, N counted from 1 as shown in the panel.
+_LAYER_TRIMS = (("opacity", "layer_opacity"), ("amount", "layer_amount"),
+                ("stretch", "layer_stretch"), ("angle", "layer_angle"), ("soft", "layer_soft"))
+for _n in range(1, SMOKE_MAX_LAYERS + 1):
+    for _short, _long in _LAYER_TRIMS:
+        DEFAULTS[f"smk_l{_n}_{_short}"] = SMOKE_LAYER_PARAMS[_long][_n - 1]
+
+for _e in catalog.VINYL_EFFECTS:
+    DEFAULTS["fx_" + _e.replace("-", "_")] = 0
+DEFAULTS["fx_grooves"] = 0      # index into catalog.GROOVE_TREATMENTS; 0 is auto
 
 _INTEGER_KEYS = {
     "max_iter", "int_r", "int_g", "int_b",
@@ -114,7 +146,12 @@ _INTEGER_KEYS = {
     "neb_warp", "neb_arm",
     "cld_cloud_r", "cld_cloud_g", "cld_cloud_b",
     "cld_sky_r", "cld_sky_g", "cld_sky_b", "cld_seed",
-    "grv_r", "grv_g", "grv_b", "grv_a", "grv_add",
+    "smk_seed", "smk_layers", "smk_soft", "smk_warp", "smk_arm", "smk_deep_soft", "smk_veil_soft",
+    "smk_light_r", "smk_light_g", "smk_light_b", "smk_mid_r", "smk_mid_g", "smk_mid_b",
+    "smk_ink_r", "smk_ink_g", "smk_ink_b",
+    "smk_acc_count", "smk_acc_seed", "smk_acc_soft", "smk_acc_ink_r", "smk_acc_ink_g", "smk_acc_ink_b",
+    "smk_shadow_soft", "fx_grooves",
+    *(f"smk_l{n}_soft" for n in range(1, SMOKE_MAX_LAYERS + 1)),
 }
 
 
@@ -192,10 +229,65 @@ def _clouds_groups():
     ]
 
 
-_GROOVE_GROUP = {"group": "Grooves", "controls": _rgb("grv") + [
-    {"key": "grv_a", "label": "Alpha", "kind": "slider", "min": 0, "max": 255, "integer": True},
-    {"key": "grv_add", "label": "Additive (light) shine", "kind": "toggle"},
-]}
+def _smoke_layer_group(n):
+    return {"group": f"Layer {n}", "controls": [
+        {"key": f"smk_l{n}_opacity", "label": "Opacity ×", "kind": "slider", "min": 0.0, "max": 3.0, "step": 0.01},
+        {"key": f"smk_l{n}_amount", "label": "Amount ×", "kind": "slider", "min": 0.0, "max": 3.0, "step": 0.01},
+        {"key": f"smk_l{n}_stretch", "label": "Stretch ×", "kind": "slider", "min": 0.25, "max": 4.0, "step": 0.05},
+        {"key": f"smk_l{n}_angle", "label": "Direction offset (deg)", "kind": "slider", "min": -90.0, "max": 90.0, "step": 1.0},
+        {"key": f"smk_l{n}_soft", "label": "Extra softness", "kind": "slider", "min": 0, "max": 10, "integer": True},
+    ]}
+
+
+def _smoke_groups(advanced=False):
+    return _smoke_base_groups() + (
+        [_smoke_layer_group(n) for n in range(1, SMOKE_MAX_LAYERS + 1)] if advanced else [])
+
+
+def _smoke_base_groups():
+    return [
+        {"group": "Smoke", "controls": [
+            {"key": "smk_seed", "label": "Seed (composition)", "kind": "field", "integer": True},
+            {"key": "smk_layers", "label": "Layers", "kind": "slider", "min": 1, "max": 12, "integer": True},
+            {"key": "smk_amount", "label": "Smoke amount", "kind": "slider", "min": 0.03, "max": 0.6, "step": 0.01},
+            {"key": "smk_opacity", "label": "Layer opacity", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01},
+            {"key": "smk_gamma", "label": "Core falloff", "kind": "slider", "min": 0.3, "max": 4.0, "step": 0.05},
+            {"key": "smk_soft", "label": "Edge softness (1 = off)", "kind": "slider", "min": 1, "max": 12, "integer": True},
+            {"key": "smk_op_var", "label": "Opacity variation (0 = all equal)", "kind": "slider", "min": 0.0, "max": 3.0, "step": 0.01},
+        ]},
+        {"group": "Wisps", "controls": [
+            {"key": "smk_stretch_lo", "label": "Stretch, least", "kind": "slider", "min": 1.0, "max": 10.0, "step": 0.1},
+            {"key": "smk_stretch_hi", "label": "Stretch, most", "kind": "slider", "min": 1.0, "max": 10.0, "step": 0.1},
+            {"key": "smk_warp", "label": "Warp octaves", "kind": "slider", "min": 2, "max": 8, "integer": True},
+            {"key": "smk_arm", "label": "Detail octaves", "kind": "slider", "min": 2, "max": 8, "integer": True},
+            {"key": "smk_spread", "label": "Direction spread (0 = all one way)", "kind": "slider", "min": 0.0, "max": 2.0, "step": 0.01},
+            {"key": "smk_rotate", "label": "Rotate all (deg)", "kind": "slider", "min": -180.0, "max": 180.0, "step": 1.0},
+        ]},
+        {"group": "Depth", "controls": [
+            {"key": "smk_deep_soft", "label": "Deep layer softness (1 = off)", "kind": "slider", "min": 1, "max": 12, "integer": True},
+            {"key": "smk_deep_op", "label": "Deep layer opacity", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01},
+            {"key": "smk_veil_soft", "label": "Body veil softness (1 = off)", "kind": "slider", "min": 1, "max": 12, "integer": True},
+            {"key": "smk_shadow", "label": "Smoke shadow (0 = off)", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01},
+            {"key": "smk_shadow_soft", "label": "Shadow softness", "kind": "slider", "min": 1, "max": 32, "integer": True},
+        ]},
+        {"group": "Body (light)", "controls": _rgb("smk_light")},
+        {"group": "Body (deep)", "controls": _rgb("smk_mid")},
+        {"group": "Smoke ink", "controls": _rgb("smk_ink")},
+        {"group": "Dark accents", "controls": [
+            {"key": "smk_acc_count", "label": "Accent layers (0 = off)", "kind": "slider", "min": 0, "max": 8, "integer": True},
+            {"key": "smk_acc_seed", "label": "Accent seed", "kind": "field", "integer": True},
+            {"key": "smk_acc_amount", "label": "Amount (low = thin threads)", "kind": "slider", "min": 0.02, "max": 0.5, "step": 0.01},
+            {"key": "smk_acc_opacity", "label": "Darkness", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01},
+            {"key": "smk_acc_gamma", "label": "Core falloff", "kind": "slider", "min": 0.3, "max": 4.0, "step": 0.05},
+            {"key": "smk_acc_soft", "label": "Softness (1 = sharp)", "kind": "slider", "min": 1, "max": 12, "integer": True},
+            {"key": "smk_acc_stretch_lo", "label": "Stretch, least", "kind": "slider", "min": 1.0, "max": 10.0, "step": 0.1},
+            {"key": "smk_acc_stretch_hi", "label": "Stretch, most", "kind": "slider", "min": 1.0, "max": 10.0, "step": 0.1},
+            {"key": "smk_acc_follow", "label": "Follow existing smoke (0 = anywhere)", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.01},
+        ]},
+        {"group": "Accent ink", "controls": _rgb("smk_acc_ink")},
+    ]
+
+
 _SHINE_GROUP = {"group": "Shine", "controls": [
     {"key": "shine_gloss", "label": "Gloss", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.02},
     {"key": "shine_angle", "label": "Angle (deg)", "kind": "slider", "min": -45.0, "max": 45.0, "step": 1.0},
@@ -204,6 +296,31 @@ _SHINE_GROUP = {"group": "Shine", "controls": [
     {"key": "shine_halo_w", "label": "Halo width", "kind": "slider", "min": 0.02, "max": 0.60, "step": 0.005},
     {"key": "shine_halo_a", "label": "Halo alpha", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.02},
 ]}
+
+
+# Vinyl Effects: finishes over any style, previewed here the way both apps apply them.
+def _effect_key(effect_id):
+    return "fx_" + effect_id.replace("-", "_")
+
+
+_EFFECTS_GROUP = {"group": "Vinyl Effects", "controls": [
+    *({"key": _effect_key(e), "label": label, "kind": "toggle"}
+      for e, label in catalog.VINYL_EFFECTS.items()),
+    {"key": "fx_grooves", "label": "Grooves", "kind": "choice",
+     "options": list(catalog.GROOVE_TREATMENTS.values())},
+]}
+
+
+def effects_from(p):
+    """The Vinyl Effects switched on in studio params."""
+    return [e for e in catalog.VINYL_EFFECTS if float(p.get(_effect_key(e), 0)) >= 0.5]
+
+
+def grooves_from(p):
+    """The groove treatment chosen in studio params (an index into GROOVE_TREATMENTS)."""
+    treatments = list(catalog.GROOVE_TREATMENTS)
+    i = int(p.get("fx_grooves", 0))
+    return treatments[i] if 0 <= i < len(treatments) else "auto"
 
 
 def param_spec(family, advanced=False):
@@ -215,18 +332,14 @@ def param_spec(family, advanced=False):
         body = _nebula_groups(advanced)
     elif family == "clouds":
         body = _clouds_groups()
+    elif family == "smoke":
+        body = _smoke_groups(advanced)
     else:
         body = []
-    return body + [_GROOVE_GROUP, _SHINE_GROUP]
+    return body + [_EFFECTS_GROUP, _SHINE_GROUP]
 
 
 # --------------------------------------------------------------------- render
-
-def _groove_track(interior):
-    groove = tuple(min(255, c + 15) for c in interior)
-    track = tuple(min(255, c + 40) for c in interior)
-    return groove, track
-
 
 def _nebula_palette_from(p, advanced):
     """Build the nebula palette closure + structure (warp, arm) from params."""
@@ -250,17 +363,43 @@ def _nebula_palette_from(p, advanced):
     return fn, warp, arm
 
 
+def _smoke_params(p):
+    """Studio params -> the renderer's SMOKE_LAYER_PARAMS shape."""
+    lo, hi = sorted((float(p["smk_stretch_lo"]), float(p["smk_stretch_hi"])))
+    return {
+        "layers": int(p["smk_layers"]), "opacity": float(p["smk_opacity"]),
+        "amount": float(p["smk_amount"]), "gamma": float(p["smk_gamma"]),
+        "soft": int(p["smk_soft"]), "stretch": (lo, hi),
+        "warp_oct": int(p["smk_warp"]), "arm_oct": int(p["smk_arm"]),
+        "deep_soft": int(p["smk_deep_soft"]), "deep_opacity": float(p["smk_deep_op"]),
+        "veil_soft": int(p["smk_veil_soft"]),
+        "light": tuple(int(p[f"smk_light_{c}"]) for c in "rgb"),
+        "mid": tuple(int(p[f"smk_mid_{c}"]) for c in "rgb"),
+        "ink": tuple(int(p[f"smk_ink_{c}"]) for c in "rgb"),
+        "opacity_variation": float(p["smk_op_var"]), "spread": float(p["smk_spread"]),
+        "rotate": float(p["smk_rotate"]),
+        "accents": int(p["smk_acc_count"]), "accent_seed": int(p["smk_acc_seed"]),
+        "accent_amount": float(p["smk_acc_amount"]), "accent_opacity": float(p["smk_acc_opacity"]),
+        "accent_gamma": float(p["smk_acc_gamma"]), "accent_soft": int(p["smk_acc_soft"]),
+        "accent_stretch": tuple(sorted((float(p["smk_acc_stretch_lo"]), float(p["smk_acc_stretch_hi"])))),
+        "accent_follow": float(p["smk_acc_follow"]),
+        "accent_ink": tuple(int(p[f"smk_acc_ink_{c}"]) for c in "rgb"),
+        "shadow": float(p["smk_shadow"]), "shadow_soft": int(p["smk_shadow_soft"]),
+        **{long: tuple((int if short == "soft" else float)(p[f"smk_l{n}_{short}"])
+                       for n in range(1, SMOKE_MAX_LAYERS + 1))
+           for short, long in _LAYER_TRIMS},
+    }
+
+
 def build_style(p, family, advanced):
     """Return the forced style dict, injecting any live catalog entries."""
     if family == "mandelbrot":
         interior = (int(p["int_r"]), int(p["int_g"]), int(p["int_b"]))
-        groove, track = _groove_track(interior)
         fractals.MANDELBROT_COLORS[_LIVE_KEY] = (
             interior,
             (p["r_base"], p["r_amp"], p["r_freq"], p["r_phase"]),
             (p["g_base"], p["g_amp"], p["g_freq"], p["g_phase"]),
-            (p["b_base"], p["b_amp"], p["b_freq"], p["b_phase"]),
-            groove, track)
+            (p["b_base"], p["b_amp"], p["b_freq"], p["b_phase"]))
         variant = (float(p["cx"]), float(p["cy"]), float(p["zoom"]),
                    int(p["max_iter"]), "studio", _LIVE_KEY)
         return {"type": "mandelbrot", "variant": variant}
@@ -278,6 +417,9 @@ def build_style(p, family, advanced):
         fn = _clouds_palette(cloud, sky)
         variant = (int(p["cld_seed"]), fn, "studio", float(p["cld_sat"]), 6, 7, "clouds")
         return {"type": "nebula", "variant": variant}
+    if family == "smoke":
+        variant = (int(p["smk_seed"]), None, "studio", 1.0, 5, 6, "layers", _smoke_params(p))
+        return {"type": "nebula", "variant": variant}
     return {"type": family}        # black / clear
 
 
@@ -289,8 +431,7 @@ def _clear_live():
 def render_vinyl(p, family, advanced, size):
     """Render the full vinyl at the given radius. Returns
     (body_surf, grooves_surf, groove_blend, shine_surf)."""
-    import pygame
-    settings = VinylSettings()
+    settings = VinylSettings(effects=effects_from(p), grooves=grooves_from(p))
     r = VinylRenderer(settings)
     style = build_style(p, family, advanced)
     try:
@@ -301,14 +442,8 @@ def render_vinyl(p, family, advanced, size):
         body = r.build_record(size, _STUDIO_BOUNDARIES, _STUDIO_ALBUM_DUR,
                               album_path=_ALBUM)
 
-        d = size * 2
-        grooves = pygame.Surface((d, d), pygame.SRCALPHA)
-        r._draw_music_zones(grooves, size, (size, size),
-                            (int(p["grv_r"]), int(p["grv_g"]),
-                             int(p["grv_b"]), int(p["grv_a"])),
-                            boundaries=_STUDIO_BOUNDARIES,
-                            album_dur=_STUDIO_ALBUM_DUR)
-        blend = "add" if int(p["grv_add"]) else "blend"
+        grooves, blend = r.build_grooves_overlay(size, style, _STUDIO_BOUNDARIES,
+                                                 _STUDIO_ALBUM_DUR)
 
         r._SHINE_PARAMS = {
             "streak_x_frac": -0.05,
@@ -333,6 +468,7 @@ class StudioController(QObject):
     advancedChanged = Signal()
     nameChanged = Signal()
     statusChanged = Signal()
+    hqChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -341,6 +477,7 @@ class StudioController(QObject):
         self._advanced = False
         self._name = "untitled"
         self._status = ""
+        self._hq = False
 
     # --- family + advanced ---
 
@@ -355,7 +492,6 @@ class StudioController(QObject):
         if fam not in FAMILIES or fam == self._family:
             return
         self._family = fam
-        self._params.update(GROOVE_DEFAULTS.get(fam, {}))
         self.familyChanged.emit()
         self.paramsChanged.emit()
 
@@ -372,6 +508,19 @@ class StudioController(QObject):
             self.paramsChanged.emit()
 
     advanced = Property(bool, getAdvanced, setAdvanced, notify=advancedChanged)
+
+    # --- HQ preview (smoke renders are slow, so the default preview is small) ---
+
+    def getHq(self):
+        return self._hq
+
+    def setHq(self, on):
+        on = bool(on)
+        if on != self._hq:
+            self._hq = on
+            self.hqChanged.emit()
+
+    hq = Property(bool, getHq, setHq, notify=hqChanged)
 
     # --- params ---
 
@@ -474,12 +623,15 @@ class StudioController(QObject):
                 self._params[k] = random.randint(140, 240)
             self._params["cld_seed"] = random.randint(1, 999)
             self._set_status("Randomized clouds")
+        elif fam == "smoke":
+            # a new composition only: the look you tuned stays as it is
+            self._params["smk_seed"] = random.randint(1, 9999)
+            self._set_status(f"New smoke composition, seed {self._params['smk_seed']}")
         self.paramsChanged.emit()
 
     @Slot()
     def reset(self):
         self._params = dict(DEFAULTS)
-        self._params.update(GROOVE_DEFAULTS.get(self._family, {}))
         self.paramsChanged.emit()
         self._set_status("Reset to defaults")
 
@@ -534,11 +686,9 @@ class StudioController(QObject):
     @Slot(result=str)
     def catalogSnippet(self):
         p, name, fam = self._params, (self._name or "studio"), self._family
-        grv = (int(p["grv_r"]), int(p["grv_g"]), int(p["grv_b"]), int(p["grv_a"]))
 
         if fam == "mandelbrot":
             interior = (int(p["int_r"]), int(p["int_g"]), int(p["int_b"]))
-            groove, track = _groove_track(interior)
 
             def chan(ch):
                 return (f"({int(p[ch + '_base'])}, {int(p[ch + '_amp'])}, "
@@ -547,29 +697,31 @@ class StudioController(QObject):
                 "# MANDELBROT_ZOOMS:\n"
                 f"    ({p['cx']:.6g}, {p['cy']:.6g}, {p['zoom']:.6g}, "
                 f"{int(p['max_iter'])}, {name!r}),\n\n"
-                "# MANDELBROT_COLORS — (interior, R, G, B, groove, track):\n"
-                f"    {name!r}: ({interior}, {chan('r')}, {chan('g')}, "
-                f"{chan('b')}, {groove}, {track}),\n\n"
-                "# MANDELBROT_GROOVE_COLORS:\n"
-                f"    {name!r}: ({grv}, (0, 0, 0, 60)),\n")
+                "# MANDELBROT_COLORS: (interior, R, G, B):\n"
+                f"    {name!r}: ({interior}, {chan('r')}, {chan('g')}, {chan('b')}),\n")
 
         if fam == "color":
             col = (int(p["col_r"]), int(p["col_g"]), int(p["col_b"]))
             return (
                 "# VINYL_COLORS:\n"
-                f"    {name!r}: {col},\n\n"
-                "# VINYL_GROOVE_COLORS — (groove_rgba, track_rgba):\n"
-                f"    {name!r}: ({grv}, None),\n")
+                f"    {name!r}: {col},\n")
+
+        if fam == "smoke":
+            return (
+                "# NEBULA_VARIANTS (lpcore/vinyl/fractals.py). To change teal-marble,\n"
+                "# replace its line with this one and keep the name 'teal-marble':\n"
+                f"    ({int(p['smk_seed'])}, None, {name!r}, 1.0, 5, 6, 'layers',\n"
+                f"     {_smoke_params(p)!r}),\n")
 
         if fam in ("nebula", "clouds"):
-            c1 = (int(p["neb_c1_r"]), int(p["neb_c1_g"]), int(p["neb_c1_b"]))
-            c2 = (int(p["neb_c2_r"]), int(p["neb_c2_g"]), int(p["neb_c2_b"]))
             if fam == "clouds":
                 cloud = (int(p["cld_cloud_r"]), int(p["cld_cloud_g"]), int(p["cld_cloud_b"]))
                 sky = (int(p["cld_sky_r"]), int(p["cld_sky_g"]), int(p["cld_sky_b"]))
                 entry = (f"    ({int(p['cld_seed'])}, _clouds_palette({cloud}, {sky}), "
                          f"{name!r}, {p['cld_sat']:.2f}, 6, 7, 'clouds'),")
             else:
+                c1 = (int(p["neb_c1_r"]), int(p["neb_c1_g"]), int(p["neb_c1_b"]))
+                c2 = (int(p["neb_c2_r"]), int(p["neb_c2_g"]), int(p["neb_c2_b"]))
                 fn, warp, arm = _nebula_palette_from(p, self._advanced)
                 amp1 = (tuple(round(a) for a in (p["amp1_r"], p["amp1_g"], p["amp1_b"]))
                         if self._advanced
@@ -588,15 +740,12 @@ class StudioController(QObject):
                     f"bright={BRIGHT_MODES[int(p['neb_bright'])]!r}, "
                     f"sparkle={SPARKLE_MODES[int(p['neb_sparkle'])]!r}),\n"
                     f"     {name!r}, {p['neb_sat']:.2f}, {warp}, {arm}),")
-            track = "None" if fam == "clouds" else "(0, 0, 0, 56)"
             return (
                 "# NEBULA_VARIANTS (lpcore/vinyl/fractals.py):\n"
-                f"{entry}\n\n"
-                "# NEBULA_GROOVE_COLORS (lpcore/vinyl/catalog.py):\n"
-                f"    {name!r}: ({grv}, {track}),\n")
+                f"{entry}\n")
 
-        return (f"# '{fam}' is a built-in style with no catalog colour entry "
-                f"to add.\n# Tune grooves/shine live; nothing to export.\n")
+        return (f"# '{fam}' is a built-in style with no catalog entry to add.\n"
+                f"# Tune its shine live; nothing to export.\n")
 
     @Slot(str)
     def copyToClipboard(self, text):

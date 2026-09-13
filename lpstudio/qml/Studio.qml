@@ -76,9 +76,15 @@ ApplicationWindow {
 
             Switch {
                 text: "Advanced"
-                visible: studio.family === "nebula"
+                visible: studio.family === "nebula" || studio.family === "smoke"
                 checked: studio.advanced
                 onToggled: studio.advanced = checked
+            }
+            Switch {
+                text: "HQ preview"
+                visible: studio.family === "smoke"
+                checked: studio.hq
+                onToggled: studio.hq = checked
             }
             Switch {
                 text: "Spin"
