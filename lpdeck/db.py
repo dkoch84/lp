@@ -89,19 +89,44 @@ _MIGRATIONS = [
 ]
 
 
+def _backfill_genres(con):
+    """Genre arrived after many tracks were indexed, and the scan skips files
+    whose modified time hasn't changed, so those tracks never got one. Forget
+    their modified time so the next scan reads their tags again."""
+    con.execute("UPDATE tracks SET mtime=0 WHERE genre=''")
+
+
+# Data migrations, applied once each in order and recorded in PRAGMA
+# user_version (a migration's number is its position, from 1). Append new ones;
+# never reorder or remove.
+_VERSIONED = [
+    _backfill_genres,        # 1
+]
+
+
 def _migrate(con):
     for table, col, decl in _MIGRATIONS:
         cols = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
         if col not in cols:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
     con.commit()
+    version = con.execute("PRAGMA user_version").fetchone()[0]
+    for number, step in enumerate(_VERSIONED[version:], start=version + 1):
+        with con:                            # a step and its version bump commit together
+            step(con)
+            con.execute(f"PRAGMA user_version = {number}")
 
 
 def connect(db_path):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-    con = sqlite3.connect(db_path)
+    # The window and the library scan each hold a connection. WAL lets reads
+    # continue while the other writes, and a writer waits for the lock
+    # (busy_timeout) instead of failing with "database is locked".
+    con = sqlite3.connect(db_path, timeout=10)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA busy_timeout = 10000")
     con.executescript(SCHEMA)
     _migrate(con)
     return con
@@ -204,6 +229,19 @@ def append_to_playlist(con, playlist_id, track_id):
     con.execute("INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES (?,?,?)",
                 (playlist_id, track_id, n))
     con.commit()
+
+
+def append_many_to_playlist(con, playlist_id, track_ids):
+    """Append several tracks in one transaction, rather than a commit per track."""
+    track_ids = list(track_ids)
+    if not track_ids:
+        return
+    with con:
+        n = con.execute("SELECT COALESCE(MAX(position)+1, 0) AS n FROM playlist_tracks "
+                        "WHERE playlist_id=?", (playlist_id,)).fetchone()["n"]
+        con.executemany("INSERT INTO playlist_tracks(playlist_id, track_id, position) "
+                        "VALUES (?,?,?)",
+                        [(playlist_id, tid, n + i) for i, tid in enumerate(track_ids)])
 
 
 def rename_playlist(con, playlist_id, name):

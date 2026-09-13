@@ -448,3 +448,52 @@ def test_prune_does_not_mistake_a_sibling_folder_for_the_library(con):
     con.execute("UPDATE albums SET path='/music-old/A/One' WHERE id=?", (alid,))
     con.commit()
     assert indexer.prune_outside(con, "/music") == 1
+
+
+# --- connection settings and versioned migrations -------------------------------
+
+def test_connection_uses_wal_and_waits_for_locks(con):
+    """The window and the library scan each hold a connection; without WAL and a
+    busy timeout, one writing while the other reads fails with 'database is locked'."""
+    assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert con.execute("PRAGMA busy_timeout").fetchone()[0] >= 5000
+
+
+def test_new_database_is_at_the_latest_version(con):
+    assert con.execute("PRAGMA user_version").fetchone()[0] == len(db._VERSIONED)
+
+
+def test_genre_backfill_makes_the_next_scan_reread_tagless_tracks(tmp_path):
+    """Tracks indexed before the genre column existed have no genre, and the
+    scan skips them by modified time. Migration 1 clears their mtime once."""
+    path = str(tmp_path / "old.db")
+    c = _legacy_db(path)
+    db._migrate(c)
+    c.execute("PRAGMA user_version = 0")      # as if written before versioning
+    _aid, _alid, tids = _seed(c, tracks=("One", "Two"))
+    c.execute("UPDATE tracks SET mtime=123, genre='' WHERE id=?", (tids[0],))
+    c.execute("UPDATE tracks SET mtime=456, genre='Doom' WHERE id=?", (tids[1],))
+    c.commit()
+    c.close()
+
+    c = db.connect(path)
+    mt = {r["id"]: r["mtime"] for r in c.execute("SELECT id, mtime FROM tracks")}
+    assert mt[tids[0]] == 0 and mt[tids[1]] == 456
+    assert c.execute("PRAGMA user_version").fetchone()[0] == len(db._VERSIONED)
+    c.execute("UPDATE tracks SET mtime=789 WHERE id=?", (tids[0],))
+    c.commit()
+    c.close()
+
+    c = db.connect(path)                      # applied once, not on every connect
+    assert c.execute("SELECT mtime FROM tracks WHERE id=?", (tids[0],)).fetchone()[0] == 789
+    c.close()
+
+
+def test_append_many_to_playlist_keeps_order_after_existing_entries(con):
+    _aid, _alid, tids = _seed(con, tracks=("One", "Two", "Three"))
+    pl = db.create_playlist(con, "mix")
+    db.append_to_playlist(con, pl, tids[2])
+    db.append_many_to_playlist(con, pl, [tids[0], tids[1]])
+    assert db.playlist_track_ids(con, pl) == [tids[2], tids[0], tids[1]]
+    db.append_many_to_playlist(con, pl, [])
+    assert db.playlist_track_ids(con, pl) == [tids[2], tids[0], tids[1]]
