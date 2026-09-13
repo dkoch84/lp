@@ -110,6 +110,8 @@ def main(argv=None):
                     help='vinyl style id, as the web picker sends (e.g. nebula-marble)')
     ap.add_argument('--label', default=VinylSettings.label,
                     help='label id (e.g. art, label-white, color-cyan)')
+    ap.add_argument('--label-text', default=VinylSettings.label_text,
+                    help='artist and album on the label: none, curved, straight or blocky')
     ap.add_argument('--effects', default='',
                     help='comma-separated Vinyl Effects (e.g. glass,rim-light)')
     ap.add_argument('--grooves', default='auto',
@@ -147,7 +149,8 @@ def main(argv=None):
                                             '_shot_art.png'))
 
     config = {'display': {'width': width, 'height': height, 'fullscreen': False}}
-    settings = VinylSettings(style=args.style, label=args.label).update(
+    settings = VinylSettings(style=args.style, label=args.label,
+                             label_text=args.label_text).update(
         effects=[e for e in args.effects.split(',') if e], grooves=args.grooves)
     # A non-empty album path is required: VinylRenderer.get_vinyl_style()
     # resolves no style for a falsy path and the disc silently renders black.
