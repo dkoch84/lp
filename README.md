@@ -4,19 +4,16 @@
 
 ## Crucible & Ruin
 
-![Howling Giant, Crucible & Ruin, on teal-marble vinyl](screenshots/crucible-and-ruin.jpg)
+![image](screenshots/crucible-and-ruin.jpg)
 
-Howling Giant's *Crucible & Ruin* on the new teal-marble vinyl, with the album art as the label.
 
 What lands in this release:
 
 - **Teal-marble vinyl**: translucent teal smoke with dark veins running through it, the disc in the shot above.
 - **Vinyl Effects**: finishes that go over any style (glass, deep edge, rim light), plus a choice of groove look (auto, shine, shadow or smooth), picked from the web UI.
-- **The track, not just the album**: the now-playing screen shows the track number and title under the year.
-- **Scrobbles you can trust**: paused time no longer counts toward a scrobble, and scrobbles made while offline are kept and sent once Last.fm is reachable again.
-- **Covers found the way you name them**: cover, folder, front or album art images, or art embedded in the files.
-- **Tracks in the right order**: albums sort by track number, not by file name.
-- **A back button that works like a website's** in the web UI.
+- **The track**: the now-playing screen shows the track number and title under the year.
+- **Better Scrobbling**: paused time no longer counts toward a scrobble, and scrobbles made while offline are kept and sent once Last.fm is reachable again.
+- **Web UI enhancements** usability, features.
 - **lp-deck and lp-studio**: the same engine now drives a desktop player (smart playlists, queue editing, media keys, tray) and a bench for designing vinyl styles, which is where teal-marble came from.
 
 ---
