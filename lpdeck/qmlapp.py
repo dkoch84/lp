@@ -12,7 +12,8 @@ import subprocess
 import threading
 import time
 
-from PySide6.QtCore import (Property, QAbstractListModel, QModelIndex, QObject, QSize, QUrl,
+from PySide6.QtCore import (Property, QAbstractListModel, QFileSystemWatcher, QModelIndex,
+                            QObject, QSize, QUrl,
                             QSettings, Qt, QTimer, Signal, Slot)
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QImageReader
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
@@ -177,11 +178,11 @@ class ArtistsModel(QAbstractListModel):
         order = self._order                       # from a fixed whitelist — safe
         if self._filter:
             self._rows = self.con.execute(
-                f"SELECT id, name FROM artists WHERE name LIKE ? ORDER BY {order}",
+                f"SELECT id, name FROM artists WHERE missing=0 AND name LIKE ? ORDER BY {order}",
                 (f"%{self._filter}%",)).fetchall()
         else:
             self._rows = self.con.execute(
-                f"SELECT id, name FROM artists ORDER BY {order}").fetchall()
+                f"SELECT id, name FROM artists WHERE missing=0 ORDER BY {order}").fetchall()
         self.endResetModel()
 
     def set_filter(self, text):
@@ -353,6 +354,13 @@ class Controller(QObject):
         self._fill_while_scanning = False
         self._scanProgress.connect(self._on_scan_progress)
         self._scanDone.connect(self._on_scan_done)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.directoryChanged.connect(self._on_library_dir_changed)
+        self._watch_queue = []
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(4000)
+        self._watch_timer.timeout.connect(self._on_watch_timer)
 
         # tick the queue footer (remaining time) once a second while playing
         self._ticker = QTimer(self)
@@ -396,18 +404,22 @@ class Controller(QObject):
         self._settings.setValue("musicFolder", path)
         self._music_folder = path
         self.libraryFolderChanged.emit()
-        self.start_index(path, prune=True)
+        self.start_index(path)        # everything outside the new folder is marked missing
 
     @Slot()
     def rescanLibrary(self):
+        """A full scan: also catches tag edits inside folders that look unchanged."""
         if self._music_folder:
             self.start_index(self._music_folder)
 
-    def start_index(self, path, prune=False):
+    def start_index(self, path, quick=False):
         """Scan `path` into the library on a background thread (its own sqlite
-        connection). A request made while a scan runs is kept and run next."""
+        connection). `quick` skips album folders whose modified time hasn't
+        changed. A request made while a scan runs is kept and run next; a full
+        request wins over a quick one."""
         if self._scanning:
-            self._scan_pending = (path, prune or bool(self._scan_pending and self._scan_pending[1]))
+            pending_quick = self._scan_pending[1] if self._scan_pending else True
+            self._scan_pending = (path, quick and pending_quick)
             return
         self._scanning = True
         self._scan_status = "Scanning…"
@@ -429,9 +441,7 @@ class Controller(QObject):
                         last[0] = now
                         self._scanProgress.emit(n_art, n_alb, n_trk)
                 try:
-                    n_art, n_alb, n_trk = indexer.index_library(c, path, progress)
-                    if prune:
-                        indexer.prune_outside(c, path)
+                    n_art, n_alb, n_trk = indexer.index_library(c, path, progress, quick=quick)
                 finally:
                     c.close()
                 status = f"{n_art} artists, {n_alb} albums, {n_trk} tracks"
@@ -453,9 +463,49 @@ class Controller(QObject):
         self.scanChanged.emit()
         self.libraryChanged.emit()
         if self._scan_pending:
-            path, prune = self._scan_pending
+            path, quick = self._scan_pending
             self._scan_pending = None
-            self.start_index(path, prune)
+            self.start_index(path, quick)
+        else:
+            self._refresh_watches()
+
+    # --- watching the music folder ---
+
+    def _on_library_dir_changed(self, _path):
+        # changes come in bursts (a copy, a rename); scan once they settle
+        self._watch_timer.start()
+
+    def _on_watch_timer(self):
+        if self._music_folder:
+            self.start_index(self._music_folder, quick=True)
+
+    def _refresh_watches(self):
+        """Watch the music folder, its artist folders and album folders, so a
+        change made while lp-deck runs is picked up. Watches are added a batch at
+        a time: adding one stats the folder, which is slow on a network share.
+        (Changes made by other machines on a network share don't notify this
+        one; Rescan covers those.)"""
+        folder = self._music_folder
+        if not folder or not os.path.isdir(folder):
+            return
+        wanted = {folder}
+        for (path,) in self.con.execute("SELECT path FROM albums WHERE missing=0"):
+            if path.startswith(folder):
+                wanted.add(path)
+                wanted.add(os.path.dirname(path))
+        current = set(self._watcher.directories())
+        stale = sorted(current - wanted)
+        if stale:
+            self._watcher.removePaths(stale)
+        self._watch_queue = sorted(wanted - current)
+        self._add_watch_batch()
+
+    def _add_watch_batch(self):
+        batch, self._watch_queue = self._watch_queue[:100], self._watch_queue[100:]
+        if batch:
+            self._watcher.addPaths(batch)
+        if self._watch_queue:
+            QTimer.singleShot(0, self._add_watch_batch)
 
     # --- search ---
 
@@ -474,8 +524,8 @@ class Controller(QObject):
                  "coverUrl": f"image://tiles/album/{al['id']}"}
                 for al in self.con.execute(
                     "SELECT al.id, al.name, al.year, al.path, COUNT(t.id) n "
-                    "FROM albums al LEFT JOIN tracks t ON t.album_id=al.id "
-                    f"WHERE al.artist_id=? GROUP BY al.id ORDER BY {order}",
+                    "FROM albums al LEFT JOIN tracks t ON t.album_id=al.id AND t.missing=0 "
+                    f"WHERE al.artist_id=? AND al.missing=0 GROUP BY al.id ORDER BY {order}",
                     (artist_id,))]
 
     @Slot(int, result="QVariantList")
@@ -488,7 +538,7 @@ class Controller(QObject):
                     "SELECT t.track_no, t.title, t.duration, t.path, "
                     "ar.name AS artist FROM tracks t "
                     "JOIN artists ar ON ar.id=t.artist_id "
-                    "WHERE t.album_id=? ORDER BY t.disc_no, t.track_no, t.title",
+                    "WHERE t.album_id=? AND t.missing=0 ORDER BY t.disc_no, t.track_no, t.title",
                     (album_id,)))]
 
     # --- search across artists / albums / songs (req #4) ---
@@ -500,7 +550,7 @@ class Controller(QObject):
             return {"artists": [], "albums": [], "songs": []}
         like = f"%{q}%"
         artists = [{"id": r["id"], "name": r["name"]} for r in self.con.execute(
-            "SELECT id, name FROM artists WHERE name LIKE ? "
+            "SELECT id, name FROM artists WHERE missing=0 AND name LIKE ? "
             "ORDER BY sort_name LIMIT 24", (like,))]
         albums = [{"id": r["id"], "name": r["name"], "year": r["year"],
                    "artist": r["artist"],
@@ -508,7 +558,7 @@ class Controller(QObject):
                   for r in self.con.execute(
                       "SELECT al.id, al.name, al.year, ar.name AS artist "
                       "FROM albums al JOIN artists ar ON ar.id=al.artist_id "
-                      "WHERE al.name LIKE ? ORDER BY al.name LIMIT 24", (like,))]
+                      "WHERE al.missing=0 AND al.name LIKE ? ORDER BY al.name LIMIT 24", (like,))]
         # a song's index within its album (matches the album's track ordering)
         songs = [{"albumId": r["album_id"], "index": r["idx"], "title": r["title"],
                   "artist": r["artist"], "album": r["album"],
@@ -517,11 +567,11 @@ class Controller(QObject):
                      "SELECT t.title, t.duration, t.path, t.album_id, "
                      "ar.name AS artist, al.name AS album, "
                      "(SELECT COUNT(*) FROM tracks t2 WHERE t2.album_id=t.album_id "
-                     " AND (t2.disc_no, t2.track_no, t2.title) "
+                     " AND t2.missing=0 AND (t2.disc_no, t2.track_no, t2.title) "
                      "   < (t.disc_no, t.track_no, t.title)) AS idx "
                      "FROM tracks t JOIN artists ar ON ar.id=t.artist_id "
                      "JOIN albums al ON al.id=t.album_id "
-                     "WHERE t.title LIKE ? ORDER BY t.title LIMIT 60", (like,))]
+                     "WHERE t.missing=0 AND t.title LIKE ? ORDER BY t.title LIMIT 60", (like,))]
         return {"artists": artists, "albums": albums, "songs": songs}
 
     # --- playlists (req #1) ---
@@ -530,17 +580,20 @@ class Controller(QObject):
     def playlists(self):
         return [{"id": p["id"], "name": p["name"], "count": p["n"]}
                 for p in self.con.execute(
-                    "SELECT pl.id, pl.name, COUNT(pt.track_id) n FROM playlists pl "
+                    "SELECT pl.id, pl.name, COUNT(t.id) n FROM playlists pl "
                     "LEFT JOIN playlist_tracks pt ON pt.playlist_id=pl.id "
+                    "LEFT JOIN tracks t ON t.id=pt.track_id AND t.missing=0 "
                     "GROUP BY pl.id ORDER BY pl.name")]
 
     @Slot(int, result="QVariantList")
     def playlistSongs(self, playlist_id):
+        # Every entry, missing ones included, so a row's index is its position for
+        # moving and removing; `available` says whether it can be played.
         return [{"index": i, "trackNo": 0, "title": t["title"],
                  "duration": t["duration"], "artist": t["artist"],
-                 "path": t["path"]}
+                 "path": t["path"], "available": not t["missing"]}
                 for i, t in enumerate(self.con.execute(
-                    "SELECT t.title, t.duration, t.path, ar.name AS artist "
+                    "SELECT t.title, t.duration, t.path, t.missing, ar.name AS artist "
                     "FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id "
                     "JOIN artists ar ON ar.id=t.artist_id "
                     "WHERE pt.playlist_id=? ORDER BY pt.position", (playlist_id,)))]
@@ -563,17 +616,18 @@ class Controller(QObject):
     def addAlbumToPlaylist(self, playlist_id, album_path):
         ids = [r["id"] for r in self.con.execute(
             "SELECT t.id FROM tracks t JOIN albums al ON al.id=t.album_id "
-            "WHERE al.path=? ORDER BY t.disc_no, t.track_no, t.title", (album_path,))]
+            "WHERE al.path=? AND t.missing=0 ORDER BY t.disc_no, t.track_no, t.title",
+            (album_path,))]
         db.append_many_to_playlist(self.con, playlist_id, ids)
         self.playlistsChanged.emit()
 
     @Slot(int, int)
     def addArtistToPlaylist(self, playlist_id, artist_id):
-        for r in self.con.execute(
-                "SELECT t.id FROM tracks t JOIN albums al ON al.id=t.album_id "
-                "WHERE t.artist_id=? ORDER BY al.year, al.name, t.disc_no, "
-                "t.track_no, t.title", (artist_id,)):
-            db.append_to_playlist(self.con, playlist_id, r["id"])
+        ids = [r["id"] for r in self.con.execute(
+            "SELECT t.id FROM tracks t JOIN albums al ON al.id=t.album_id "
+            "WHERE t.artist_id=? AND t.missing=0 ORDER BY al.year, al.name, t.disc_no, "
+            "t.track_no, t.title", (artist_id,))]
+        db.append_many_to_playlist(self.con, playlist_id, ids)
         self.playlistsChanged.emit()
 
     @Slot(int, "QVariantList")
@@ -659,7 +713,7 @@ class Controller(QObject):
                       "SELECT t.title, t.track_no, t.path, t.duration, "
                       "ar.name AS artist FROM tracks t "
                       "JOIN artists ar ON ar.id=t.artist_id "
-                      "WHERE t.album_id=? ORDER BY t.disc_no, t.track_no, t.title",
+                      "WHERE t.album_id=? AND t.missing=0 ORDER BY t.disc_no, t.track_no, t.title",
                       (album_id,))]
         if not tracks:
             return
@@ -672,20 +726,25 @@ class Controller(QObject):
     def playPlaylist(self, playlist_id, start):
         """Play a playlist as a mixed-album queue. Each track keeps its own album
         context so the now-playing art + vinyl follow the current track."""
+        rows = self.con.execute(
+            "SELECT t.title, t.path, t.duration, t.missing, ar.name AS artist, "
+            "al.id AS album_id, al.path AS album_path, "
+            "al.name AS album_name, t.artist_id "
+            "FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id "
+            "JOIN artists ar ON ar.id=t.artist_id "
+            "JOIN albums al ON al.id=t.album_id "
+            "WHERE pt.playlist_id=? ORDER BY pt.position", (playlist_id,)).fetchall()
+        # `start` is a row in the playlist view, which lists missing entries too:
+        # begin at that row, or the next one that can be played.
+        start = sum(1 for r in rows[:max(0, start)] if not r["missing"])
         tracks = [{"title": t["title"], "track_no": 0, "path": t["path"],
                    "duration": t["duration"], "artist": t["artist"],
                    "album_path": t["album_path"], "album_id": t["album_id"],
                    "artist_id": t["artist_id"], "album_name": t["album_name"]}
-                  for t in self.con.execute(
-                      "SELECT t.title, t.path, t.duration, ar.name AS artist, "
-                      "al.id AS album_id, al.path AS album_path, "
-                      "al.name AS album_name, t.artist_id "
-                      "FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id "
-                      "JOIN artists ar ON ar.id=t.artist_id "
-                      "JOIN albums al ON al.id=t.album_id "
-                      "WHERE pt.playlist_id=? ORDER BY pt.position", (playlist_id,))]
+                  for t in rows if not t["missing"]]
         if not tracks:
             return
+        start = min(start, len(tracks) - 1)
         self._np_playlist_id = playlist_id
         # album_path stays None (mixed albums); per-track album context drives
         # the now-playing art/vinyl via _refresh_now_playing.
@@ -914,7 +973,7 @@ class Controller(QObject):
                 for t in self.con.execute(
                     "SELECT t.track_no, t.title, t.duration, t.path, ar.name AS artist "
                     "FROM tracks t JOIN artists ar ON ar.id=t.artist_id "
-                    "WHERE t.album_id=? ORDER BY t.disc_no, t.track_no, t.title",
+                    "WHERE t.album_id=? AND t.missing=0 ORDER BY t.disc_no, t.track_no, t.title",
                     (album_id,))]
 
     def _track_dicts_for_paths(self, paths):
@@ -929,7 +988,8 @@ class Controller(QObject):
                     "t.artist_id, al.path AS album_path, al.name AS album_name, "
                     "ar.name AS artist FROM tracks t "
                     "JOIN albums al ON al.id=t.album_id "
-                    f"JOIN artists ar ON ar.id=t.artist_id WHERE t.path IN ({marks})", chunk):
+                    f"JOIN artists ar ON ar.id=t.artist_id WHERE t.missing=0 AND t.path IN ({marks})",
+                    chunk):
                 found[r["path"]] = {"title": r["title"], "track_no": r["track_no"],
                                     "path": r["path"], "duration": r["duration"],
                                     "artist": r["artist"], "album_path": r["album_path"],

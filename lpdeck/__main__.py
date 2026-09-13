@@ -81,7 +81,8 @@ def main():
         chosen = str(QSettings("lp-deck", "lp-deck").value("musicFolder", "") or "")
         folder = chosen if chosen and os.path.isdir(chosen) else music_path
         controller.use_music_folder(folder)
-        controller.start_index(folder)
+        # quick: skip album folders unchanged since the last scan (Rescan does it all)
+        controller.start_index(folder, quick=True)
         if mpris_handle:
             # repeat, shuffle and raise requests from the desktop update the window too
             mpris_handle.set_controls(controller.externalCommand.emit)

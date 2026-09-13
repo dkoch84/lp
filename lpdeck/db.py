@@ -86,6 +86,13 @@ _MIGRATIONS = [
     ("tracks", "last_played", "REAL NOT NULL DEFAULT 0"),
     ("tracks", "genre",       "TEXT NOT NULL DEFAULT ''"),
     ("tracks", "added_at",    "REAL NOT NULL DEFAULT 0"),
+    # A file that disappears is marked missing instead of deleted, so its
+    # playlists, favourites and history survive; albums and artists with
+    # nothing available are hidden the same way (see indexer.index_library).
+    ("tracks", "missing",     "INTEGER NOT NULL DEFAULT 0"),
+    ("albums", "missing",     "INTEGER NOT NULL DEFAULT 0"),
+    ("albums", "dir_mtime",   "REAL NOT NULL DEFAULT 0"),
+    ("artists", "missing",    "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -189,7 +196,7 @@ def artist_cover_paths(con, artist_id, limit=4):
     """Up to `limit` cover paths for one artist (oldest first) — the per-tile
     query used by the QML image provider."""
     return [r["cover_path"] for r in con.execute(
-        "SELECT cover_path FROM albums WHERE artist_id=? "
+        "SELECT cover_path FROM albums WHERE artist_id=? AND missing=0 "
         "AND cover_path IS NOT NULL AND cover_path <> '' "
         "ORDER BY year, name LIMIT ?", (artist_id, limit))]
 
@@ -200,7 +207,7 @@ def artist_covers(con, limit=4):
     out = {}
     for r in con.execute(
             "SELECT artist_id, cover_path FROM albums "
-            "WHERE cover_path IS NOT NULL AND cover_path <> '' "
+            "WHERE missing=0 AND cover_path IS NOT NULL AND cover_path <> '' "
             "ORDER BY artist_id, year, name"):
         lst = out.setdefault(r["artist_id"], [])
         if len(lst) < limit:
@@ -303,7 +310,7 @@ def _track_rows(con, where, params, order, limit):
         "t.artist_id, ar.name AS artist "
         "FROM tracks t JOIN albums al ON al.id=t.album_id "
         "JOIN artists ar ON ar.id=t.artist_id "
-        f"WHERE {where} ORDER BY {order} LIMIT ?", (*params, limit))]
+        f"WHERE t.missing=0 AND ({where}) ORDER BY {order} LIMIT ?", (*params, limit))]
 
 
 def recently_played(con, limit=100):
@@ -324,7 +331,7 @@ def favorites(con, limit=1000):
 
 def genres(con):
     return [r["genre"] for r in con.execute(
-        "SELECT DISTINCT genre FROM tracks WHERE genre <> '' ORDER BY genre")]
+        "SELECT DISTINCT genre FROM tracks WHERE missing=0 AND genre <> '' ORDER BY genre")]
 
 
 def genre_tracks(con, genre, limit=1000):

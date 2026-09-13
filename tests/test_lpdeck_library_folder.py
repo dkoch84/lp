@@ -129,3 +129,44 @@ def test_a_folder_picked_mid_scan_is_queued_and_wins(deck, tmp_path):
     c.setMusicFolder(str(second))                        # arrives while the first scan runs
     assert _wait(app, lambda: _idle(c), timeout=60)
     assert _artist_names(con) == ["Second"]
+
+
+def test_a_folder_change_on_disk_starts_a_quick_scan(deck, tmp_path, monkeypatch):
+    app, c, con, _artists = deck
+    music = tmp_path / "music"
+    _album(music, "Artist A", "Album One")
+    c.use_music_folder(str(music))
+    calls = []
+    monkeypatch.setattr(c, "start_index", lambda path, quick=False: calls.append((path, quick)))
+    c._on_library_dir_changed(str(music))
+    c._on_library_dir_changed(str(music))            # a burst of changes: one scan
+    assert c._watch_timer.isActive() and calls == []
+    c._on_watch_timer()
+    assert calls == [(str(music), True)]
+
+
+def test_watches_cover_the_folder_its_artists_and_albums(deck, tmp_path):
+    app, c, con, _artists = deck
+    music = tmp_path / "music"
+    _album(music, "Artist A", "Album One")
+    _album(music, "Artist B", "Album Two")
+    c.use_music_folder(str(music))
+    c.start_index(str(music))
+    assert _wait(app, lambda: _idle(c))
+    assert _wait(app, lambda: not c._watch_queue)
+    watched = set(c._watcher.directories())
+    assert {str(music), str(music / "Artist A"), str(music / "Artist A" / "Album One"),
+            str(music / "Artist B" / "Album Two")} <= watched
+
+
+def test_a_full_request_wins_over_a_queued_quick_one(deck, tmp_path):
+    app, c, con, _artists = deck
+    music = tmp_path / "music"
+    for i in range(10):
+        _album(music, f"Artist {i}", "Album")
+    c.use_music_folder(str(music))
+    c.start_index(str(music), quick=True)
+    c.start_index(str(music), quick=True)
+    c.start_index(str(music))                         # full
+    assert c._scan_pending == (str(music), False)
+    assert _wait(app, lambda: _idle(c), timeout=60)
