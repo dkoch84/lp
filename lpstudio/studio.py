@@ -7,7 +7,8 @@ renderer:
              renderer's style cache (so any family renders the real way),
   * grooves: drawn by the same renderer code lp and lp-deck use, so the
     preview matches what ships,
-  * shine  — ``build_shine_overlay`` with instance-overridden shine params.
+  * shine: ``build_shine_overlay`` exactly as lp and lp-deck draw it (the
+    shine is the same for every style, so it isn't a studio control).
 
 Families:
   * mandelbrot — zoom location + sinusoidal RGB palette (live scheme injected
@@ -117,11 +118,6 @@ DEFAULTS = {
     "smk_acc_follow": SMOKE_LAYER_PARAMS["accent_follow"],
     "smk_acc_ink_r": SMOKE_LAYER_PARAMS["accent_ink"][0], "smk_acc_ink_g": SMOKE_LAYER_PARAMS["accent_ink"][1],
     "smk_acc_ink_b": SMOKE_LAYER_PARAMS["accent_ink"][2],
-    # grooves
-    # shine
-    "shine_gloss": 0.70, "shine_angle": 15.0,
-    "shine_core_w": 0.06, "shine_core_a": 0.28,
-    "shine_halo_w": 0.16, "shine_halo_a": 0.10,
 }
 
 # Per-layer smoke trims: smk_l<N>_<trim>, N counted from 1 as shown in the panel.
@@ -288,16 +284,6 @@ def _smoke_base_groups():
     ]
 
 
-_SHINE_GROUP = {"group": "Shine", "controls": [
-    {"key": "shine_gloss", "label": "Gloss", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.02},
-    {"key": "shine_angle", "label": "Angle (deg)", "kind": "slider", "min": -45.0, "max": 45.0, "step": 1.0},
-    {"key": "shine_core_w", "label": "Core width", "kind": "slider", "min": 0.01, "max": 0.30, "step": 0.005},
-    {"key": "shine_core_a", "label": "Core alpha", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.02},
-    {"key": "shine_halo_w", "label": "Halo width", "kind": "slider", "min": 0.02, "max": 0.60, "step": 0.005},
-    {"key": "shine_halo_a", "label": "Halo alpha", "kind": "slider", "min": 0.0, "max": 1.0, "step": 0.02},
-]}
-
-
 # Vinyl Effects: finishes over any style, previewed here the way both apps apply them.
 def _effect_key(effect_id):
     return "fx_" + effect_id.replace("-", "_")
@@ -336,7 +322,7 @@ def param_spec(family, advanced=False):
         body = _smoke_groups(advanced)
     else:
         body = []
-    return body + [_EFFECTS_GROUP, _SHINE_GROUP]
+    return body + [_EFFECTS_GROUP]
 
 
 # --------------------------------------------------------------------- render
@@ -445,15 +431,6 @@ def render_vinyl(p, family, advanced, size):
         grooves, blend = r.build_grooves_overlay(size, style, _STUDIO_BOUNDARIES,
                                                  _STUDIO_ALBUM_DUR)
 
-        r._SHINE_PARAMS = {
-            "streak_x_frac": -0.05,
-            "streak_angle_deg": float(p["shine_angle"]),
-            "streak_core_width": float(p["shine_core_w"]),
-            "streak_core_alpha": float(p["shine_core_a"]),
-            "streak_halo_width": float(p["shine_halo_w"]),
-            "streak_halo_alpha": float(p["shine_halo_a"]),
-        }
-        r._GLOSS_BY_TYPE = {style["type"]: float(p["shine_gloss"])}
         shine = r.build_shine_overlay(size, style)
         return body, grooves, blend, shine
     finally:
@@ -674,7 +651,8 @@ class StudioController(QObject):
         self._family = data.get("family", "mandelbrot")
         self._advanced = bool(data.get("advanced", False))
         self._params = dict(DEFAULTS)
-        self._params.update(data.get("params", {}))
+        # keys from controls that no longer exist (the old shine sliders) are left behind
+        self._params.update({k: v for k, v in data.get("params", {}).items() if k in DEFAULTS})
         self.setName(data.get("name", ref))
         self.familyChanged.emit()
         self.advancedChanged.emit()
@@ -745,7 +723,7 @@ class StudioController(QObject):
                 f"{entry}\n")
 
         return (f"# '{fam}' is a built-in style with no catalog entry to add.\n"
-                f"# Tune its shine live; nothing to export.\n")
+                f"# Nothing to export.\n")
 
     @Slot(str)
     def copyToClipboard(self, text):
