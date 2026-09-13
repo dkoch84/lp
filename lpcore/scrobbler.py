@@ -48,6 +48,11 @@ class Scrobbler:
         self.player.on('track_change', self._on_track_change)
         self.player.on('album_end', self._on_album_end)
         self.player.on('stop', self._on_stop)
+        # Paused time doesn't count toward the scrobble threshold. Queue edits
+        # ('queue_change') are deliberately not listened to: they aren't a new
+        # track, and treating them as one scrobbled the same track twice.
+        self.player.on('paused', self._on_paused)
+        self.player.on('resumed', self._on_resumed)
 
     def _restore_session(self):
         if not self._configured or not pylast:
@@ -128,11 +133,26 @@ class Scrobbler:
             'duration': duration,
         }
 
+    @staticmethod
+    def _played_seconds(track):
+        """Seconds of the track actually heard: time paused is left out."""
+        played = track.get('played')
+        if played is None:                   # a track dict from before pause tracking
+            return time.time() - track.get('start_time', time.time())
+        resumed = track.get('resumed_at')
+        return played + (time.monotonic() - resumed if resumed is not None else 0.0)
+
+    @staticmethod
+    def _start(track):
+        track['start_time'] = time.time()    # the scrobble's timestamp
+        track['played'] = 0.0
+        track['resumed_at'] = time.monotonic()
+
     def _should_scrobble(self, track):
         """Check if track meets scrobble criteria."""
         if not track or track['duration'] < MIN_TRACK_LENGTH:
             return False
-        elapsed = time.time() - track.get('start_time', time.time())
+        elapsed = self._played_seconds(track)
         return (elapsed >= track['duration'] * MIN_SCROBBLE_PERCENT or
                 elapsed >= MIN_SCROBBLE_SECONDS)
 
@@ -174,12 +194,25 @@ class Scrobbler:
 
         threading.Thread(target=_submit, daemon=True).start()
 
+    def _on_paused(self):
+        with self._lock:
+            track = self._current_track
+            if track and track.get('resumed_at') is not None:
+                track['played'] = track.get('played', 0.0) + time.monotonic() - track['resumed_at']
+                track['resumed_at'] = None
+
+    def _on_resumed(self):
+        with self._lock:
+            track = self._current_track
+            if track and track.get('resumed_at') is None:
+                track['resumed_at'] = time.monotonic()
+
     def _on_play_start(self):
         track = self._get_track_info()
         if not track:
             return
         with self._lock:
-            track['start_time'] = time.time()
+            self._start(track)
             self._current_track = track
             self._scrobbled = False
         self._do_now_playing(track)
@@ -197,7 +230,7 @@ class Scrobbler:
         if not track:
             return
         with self._lock:
-            track['start_time'] = time.time()
+            self._start(track)
             self._current_track = track
             self._scrobbled = False
         self._do_now_playing(track)

@@ -4,6 +4,7 @@ import glob
 import logging
 import threading
 import time
+from mutagen import File as MutagenFile
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
@@ -58,6 +59,11 @@ class PlayerBackend:
         # True while swapping the media list — suppresses stale list events from
         # the outgoing playback so they don't desync state on the new queue.
         self._loading = False
+        # (offset seconds, paused, player) to apply once the player reports it
+        # is playing; seeking or pausing earlier is ignored by VLC.
+        self._pending_start = None
+        # file path -> tags; the now-playing status is read many times a second
+        self._meta_cache = {}
 
         # --- equalizer (live, runtime-settable) ---
         self._eq = None
@@ -86,6 +92,35 @@ class PlayerBackend:
         pem = self.player.event_manager()
         if pem:
             pem.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_track_end)
+            pem.event_attach(vlc.EventType.MediaPlayerPlaying, self._on_playing)
+
+    def _on_playing(self, event):
+        """Apply a session's resume offset and pause once VLC has actually
+        started the track. Replaces fixed timers, which fired too early on slow
+        storage and were silently ignored."""
+        with self._lock:
+            pending, self._pending_start = self._pending_start, None
+        if not pending:
+            return
+        # libVLC must not be called back from inside its own event callback.
+        threading.Thread(target=self._apply_start, args=pending, daemon=True).start()
+
+    def _apply_start(self, offset, paused, player):
+        try:
+            if offset > 0:
+                player.set_time(int(offset * 1000))
+            if paused:
+                player.set_pause(1)
+        except Exception as e:
+            log.warning("could not restore the playback position: %s", e)
+            return
+        if paused:
+            self._fire('paused')
+
+    def is_loaded(self):
+        """True while a queue is loaded for playback (playing or paused)."""
+        with self._lock:
+            return self._playing and bool(self.album)
 
     def _on_track_end(self, event):
         self._last_end_t = time.monotonic()
@@ -147,8 +182,15 @@ class PlayerBackend:
             return
         self.play_tracks(files, album_path=album_path, start=start)
 
+    def _durations_for(self, files, known=None):
+        """Track lengths: taken from `known` where the caller already has them
+        (lp-deck's library), read from the file only where it doesn't."""
+        known = list(known or [])
+        return [float(known[i]) if i < len(known) and known[i] else self._get_file_duration(f)
+                for i, f in enumerate(files)]
+
     def play_tracks(self, files, album_path=None, start=0, paused=False,
-                    start_offset=0.0):
+                    start_offset=0.0, durations=None):
         """Play an explicit list of track paths gaplessly (a queue), starting at
         index ``start``. ``album_path`` is optional context (used for vinyl style
         selection + logging). play_album() is just this over a directory listing.
@@ -159,9 +201,10 @@ class PlayerBackend:
         if not files:
             return
         if self._xf_ms > 0:
-            return self._play_crossfade(files, album_path, start, paused, start_offset)
+            return self._play_crossfade(files, album_path, start, paused, start_offset,
+                                        durations)
 
-        durations = [self._get_file_duration(f) for f in files]
+        durations = self._durations_for(files, durations)
         boundaries, cumulative = [], 0.0
         for dur in durations:
             boundaries.append(cumulative)
@@ -201,15 +244,13 @@ class PlayerBackend:
         log.info("play: %s — %d tracks, %.0fs, start=%d, aout=%s",
                  ctx, len(files), cumulative, start_idx, self._audio_output)
         self._list_player.set_media_list(media_list)
+        with self._lock:
+            self._pending_start = ((start_offset, paused, self.player)
+                                   if start_offset > 0 or paused else None)
         if start_idx:
             self._list_player.play_item_at_index(start_idx)
         else:
             self._list_player.play()
-        if start_offset > 0:
-            threading.Timer(0.2, self.player.set_time,
-                            (int(start_offset * 1000),)).start()
-        if paused:
-            threading.Timer(0.3, self.player.set_pause, (1,)).start()
         self._fire('play_start')
 
     def stop(self):
@@ -246,13 +287,16 @@ class PlayerBackend:
         self._list_player.previous()
 
     def toggle_pause(self):
-        """Pause/resume the current track (VLC pause toggles)."""
+        """Pause/resume the current track (VLC pause toggles). Fires 'paused' or
+        'resumed', so listeners like the scrobbler can leave paused time out."""
+        was_playing = self.is_actively_playing()
         if self._xf_ms > 0:
             self._active().pause()
             if self._xf_fading and self._player_b is not None:
                 self._idle().pause()
-            return
-        self._list_player.pause()
+        else:
+            self._list_player.pause()
+        self._fire('paused' if was_playing else 'resumed')
 
     def set_repeat(self, mode):
         """Repeat mode: 'off' | 'all' (loop the queue) | 'one' (repeat track)."""
@@ -267,8 +311,9 @@ class PlayerBackend:
         are distinct verbs unlike the toggle the transport button uses."""
         if self._xf_ms > 0:
             self._active().set_pause(1 if paused else 0)
-            return
-        self.player.set_pause(1 if paused else 0)
+        else:
+            self.player.set_pause(1 if paused else 0)
+        self._fire('paused' if paused else 'resumed')
 
     def is_actively_playing(self):
         """True only while audio is actually advancing (False when paused). The
@@ -319,21 +364,24 @@ class PlayerBackend:
                     break
             offset_ms = int((target - self.track_boundaries[idx]) * 1000)
             cur = self.current_song_index
+        # Across tracks, the offset waits for the new track to start playing
+        # (see _on_playing): VLC ignores set_time before then.
         if self._xf_ms > 0:
             if idx == cur:
                 self._active().set_time(offset_ms)
             else:
+                with self._lock:
+                    self._pending_start = ((offset_ms / 1000.0, False, self._active())
+                                           if offset_ms > 0 else None)
                 self._xf_jump(idx)
-                if offset_ms > 0:
-                    threading.Timer(0.15, self._active().set_time,
-                                    (offset_ms,)).start()
             return
         if idx == cur:
             self.player.set_time(offset_ms)
         else:
+            with self._lock:
+                self._pending_start = ((offset_ms / 1000.0, False, self.player)
+                                       if offset_ms > 0 else None)
             self._list_player.play_item_at_index(idx)
-            if offset_ms > 0:
-                threading.Timer(0.15, self.player.set_time, (offset_ms,)).start()
 
     def seek_track(self, seconds):
         """Set the position within the *current track* (MPRIS SetPosition)."""
@@ -426,6 +474,9 @@ class PlayerBackend:
     def _ensure_player_b(self):
         if self._player_b is None:
             self._player_b = self._instance.media_player_new()
+            em = self._player_b.event_manager()
+            if em:
+                em.event_attach(vlc.EventType.MediaPlayerPlaying, self._on_playing)
             if self._eq is not None:
                 try:
                     self._player_b.set_equalizer(self._eq)
@@ -451,10 +502,10 @@ class PlayerBackend:
             t.join(timeout=1.0)
         self._xf_thread = None
 
-    def _play_crossfade(self, files, album_path, start, paused, start_offset):
+    def _play_crossfade(self, files, album_path, start, paused, start_offset, durations=None):
         self._ensure_player_b()
         self._stop_xf_thread()
-        durations = [self._get_file_duration(f) for f in files]
+        durations = self._durations_for(files, durations)
         boundaries, cum = [], 0.0
         for d in durations:
             boundaries.append(cum)
@@ -482,11 +533,10 @@ class PlayerBackend:
         m = self._instance.media_new(files[start_idx])
         act.set_media(m)
         act.audio_set_volume(self._xf_master_vol)
+        with self._lock:
+            self._pending_start = ((start_offset, paused, act)
+                                   if start_offset > 0 or paused else None)
         act.play()
-        if start_offset > 0:
-            threading.Timer(0.2, act.set_time, (int(start_offset * 1000),)).start()
-        if paused:
-            threading.Timer(0.3, act.set_pause, (1,)).start()
         log.info("play (crossfade %dms): %d tracks, start=%d, aout=%s",
                  self._xf_ms, len(files), start_idx, self._audio_output)
         self._start_xf_thread()
@@ -616,40 +666,70 @@ class PlayerBackend:
 
     # --- live queue edits (no playback interruption) ---
 
-    def append_tracks(self, files):
-        """Append tracks to the live media list without restarting playback
-        (VLC MediaList is live; the list player keeps going)."""
-        return self._add_tracks(files, at=None)
+    def append_tracks(self, files, durations=None):
+        """Append tracks to the live queue without restarting playback (VLC's
+        MediaList is live; the list player keeps going)."""
+        return self._add_tracks(files, at=None, durations=durations)
 
-    def insert_tracks_next(self, files):
+    def insert_tracks_next(self, files, durations=None):
         """Insert tracks right after the current one (play-next)."""
-        return self._add_tracks(files, at=self.current_song_index + 1)
+        return self._add_tracks(files, at=self.current_song_index + 1, durations=durations)
 
-    def _add_tracks(self, files, at):
-        files = [f for f in files if f]
-        if not files or self._media_list is None:
+    def _add_tracks(self, files, at, durations=None):
+        known = list(durations or [])
+        pairs = [(f, known[i] if i < len(known) else None) for i, f in enumerate(files) if f]
+        if not pairs:
             return
+        new_durations = self._durations_for([f for f, _ in pairs], [d for _, d in pairs])
         with self._lock:
-            ml = self._media_list
-            for off, f in enumerate(files):
-                m = self._instance.media_new(f)
-                if at is None:
-                    ml.add_media(m)
-                    self.album.append(f)
-                    self._mrls.append(m.get_mrl())
-                else:
-                    pos = at + off
-                    ml.insert_media(m, pos)
-                    self.album.insert(pos, f)
+            crossfading = self._xf_ms > 0
+            if not crossfading and self._media_list is None:
+                return                        # nothing loaded to add to
+            ml = None if crossfading else self._media_list
+            pos0 = len(self.album) if at is None else max(0, min(at, len(self.album)))
+            for off, (f, _) in enumerate(pairs):
+                pos = pos0 + off
+                self.album.insert(pos, f)
+                self.track_durations.insert(pos, new_durations[off])
+                if ml is not None:
+                    # the crossfade engine reads self.album directly; only the
+                    # gapless list player needs the media list kept in step
+                    m = self._instance.media_new(f)
+                    if pos >= ml.count():
+                        ml.add_media(m)
+                    else:
+                        ml.insert_media(m, pos)
                     self._mrls.insert(pos, m.get_mrl())
-            # recompute durations / boundaries / total for the new list
-            self.track_durations = [self._get_file_duration(p) for p in self.album]
             self.track_boundaries, cum = [], 0.0
             for d in self.track_durations:
                 self.track_boundaries.append(cum)
                 cum += d
             self.album_duration = cum
-        self._fire('track_change')
+        # Not 'track_change': the current track hasn't changed, and listeners
+        # like the scrobbler treat that event as a new track.
+        self._fire('queue_change')
+
+    def jump_to(self, idx):
+        """Play queued track `idx` without reloading the queue, so gapless
+        playback of the loaded list carries on around it."""
+        with self._lock:
+            n = len(self.album)
+            playing = self._playing
+            cur = self.current_song_index
+            has_list = self._media_list is not None
+        if not 0 <= idx < n:
+            return
+        if self._xf_ms > 0 and playing:
+            self._xf_jump(idx)
+            return
+        if not playing or not has_list:
+            self.play_tracks(list(self.album), album_path=self.album_path, start=idx,
+                             durations=list(self.track_durations))
+            return
+        if idx == cur:
+            self.player.set_time(0)
+            return
+        self._list_player.play_item_at_index(idx)   # NextItemSet updates the index
 
     def _get_file_duration(self, file_path):
         try:
@@ -658,7 +738,6 @@ class PlayerBackend:
                 return MP3(file_path).info.length
             elif lower.endswith('.flac'):
                 return FLAC(file_path).info.length
-            from mutagen import File as MutagenFile
             mf = MutagenFile(file_path)
             if mf is not None and mf.info is not None:
                 return float(getattr(mf.info, 'length', 0.0) or 0.0)
@@ -684,6 +763,25 @@ class PlayerBackend:
         return None
 
     def get_song_metadata(self, file_path):
+        """Tags for `file_path`, read once and cached. The status behind the
+        now-playing display is read many times a second, and re-parsing the file
+        each time is slow, especially over a network share."""
+        if file_path in self._meta_cache:
+            return self._meta_cache[file_path]
+        meta = self._read_song_metadata(file_path)
+        if len(self._meta_cache) > 4096:
+            self._meta_cache.clear()
+        self._meta_cache[file_path] = meta
+        return meta
+
+    def invalidate_metadata(self, file_path=None):
+        """Forget cached tags after a tag edit: for one file, or for all."""
+        if file_path is None:
+            self._meta_cache.clear()
+        else:
+            self._meta_cache.pop(file_path, None)
+
+    def _read_song_metadata(self, file_path):
         try:
             lower = file_path.lower()
             if lower.endswith('.mp3'):
@@ -693,17 +791,14 @@ class PlayerBackend:
                 audio = FLAC(file_path)
                 audio_info = audio
             else:
-                return None
+                # m4a, ogg, opus, wav, …: mutagen's generic loader with easy keys
+                audio = MutagenFile(file_path, easy=True)
+                if audio is None:
+                    return None
+                audio_info = audio
 
-            try:
-                bitrate = audio_info.info.bitrate
-            except AttributeError:
-                bitrate = None
-
-            try:
-                sampling_rate = audio_info.info.sample_rate
-            except AttributeError:
-                sampling_rate = None
+            bitrate = getattr(getattr(audio_info, 'info', None), 'bitrate', None)
+            sampling_rate = getattr(getattr(audio_info, 'info', None), 'sample_rate', None)
 
             return {
                 'title': audio.get('title', [None])[0],
