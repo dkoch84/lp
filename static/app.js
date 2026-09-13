@@ -518,7 +518,7 @@ function esc(s) {
 async function loadVersion() {
   try {
     const v = await api('/api/version');
-    brandRelease.textContent = v.release || '';
+    brandRelease.textContent = v.title || v.release || '';
     if (v.describe) brand.title = `lp ${v.describe} — release notes`;
   } catch {
     brandRelease.textContent = '';  // leave the lp wordmark, drop the release tag

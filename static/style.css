@@ -466,7 +466,7 @@ main {
   letter-spacing: 0.06em;
   color: #888;
   padding: 2px 8px;
-  border: 1px solid #2bbbd0;  /* cyan, matching the release vinyl */
+  border: 1px solid #52a89b;  /* teal, matching the release vinyl */
   border-radius: 999px;
   white-space: nowrap;
   transition: color 0.15s, background 0.15s;
@@ -478,7 +478,7 @@ main {
 
 #brand:hover #brand-release {
   color: #0b1416;
-  background: #2bbbd0;
+  background: #52a89b;
 }
 
 #track-sheet {
