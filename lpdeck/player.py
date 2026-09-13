@@ -10,8 +10,16 @@ repeat, add-to-queue / play-next, volume, seeking, and save/restore of the
 session so a relaunch resumes where you left off.
 """
 import json
+import logging
 import os
 import random
+
+log = logging.getLogger("lpdeck.player")
+
+
+def _durations(tracks):
+    """Lengths the library already knows, so the backend needn't open each file."""
+    return [float(t.get("duration") or 0) for t in tracks]
 
 
 class QueuePlayer:
@@ -23,6 +31,7 @@ class QueuePlayer:
         self.shuffle = False
         self.repeat = "off"              # off | all | one
         self._natural = []               # queue order before shuffling
+        self._autosave_path = None
 
     def set_queue(self, tracks, start=0, album_path=None):
         """Replace the queue with `tracks` (dicts incl. 'path') and start playing
@@ -42,7 +51,8 @@ class QueuePlayer:
             start = 0
         self.queue = tracks
         self.backend.play_tracks([t["path"] for t in self.queue],
-                                 album_path=album_path, start=start)
+                                 album_path=album_path, start=start,
+                                 durations=_durations(self.queue))
 
     def restore_queue(self, tracks, start, offset, album_path=None):
         """Reload a saved session paused at `offset` seconds into track `start`."""
@@ -54,7 +64,8 @@ class QueuePlayer:
             return
         start = max(0, min(start, len(tracks) - 1))
         self.backend.play_tracks([t["path"] for t in tracks], album_path=album_path,
-                                 start=start, paused=True, start_offset=offset)
+                                 start=start, paused=True, start_offset=offset,
+                                 durations=_durations(tracks))
 
     def add_tracks(self, tracks, play_next=False):
         """Append (or insert-next) tracks onto the current queue without
@@ -67,12 +78,19 @@ class QueuePlayer:
             return
         paths = [t["path"] for t in tracks]
         if play_next:
+            cur = self.current()
             at = self.index + 1
             self.queue[at:at] = tracks
-            self.backend.insert_tracks_next(paths)
+            # Keep the unshuffled order in step too, or turning shuffle off would
+            # restore an order that doesn't contain these tracks.
+            n = next((i for i, t in enumerate(self._natural) if t is cur), None)
+            pos = len(self._natural) if n is None else n + 1
+            self._natural[pos:pos] = tracks
+            self.backend.insert_tracks_next(paths, durations=_durations(tracks))
         else:
             self.queue.extend(tracks)
-            self.backend.append_tracks(paths)
+            self._natural.extend(tracks)
+            self.backend.append_tracks(paths, durations=_durations(tracks))
 
     def set_shuffle(self, on):
         """Toggle shuffle. While playing, reshuffle the *upcoming* tracks (or
@@ -95,7 +113,7 @@ class QueuePlayer:
         start = next((i for i, t in enumerate(new) if t is cur), 0)
         self.backend.play_tracks([t["path"] for t in new],
                                  album_path=self.album_path, start=start,
-                                 start_offset=offset)
+                                 start_offset=offset, durations=_durations(new))
 
     def set_repeat(self, mode):
         self.repeat = mode if mode in ("off", "all", "one") else "off"
@@ -106,10 +124,10 @@ class QueuePlayer:
         return self.repeat
 
     def jump_to(self, index):
-        """Play the queued track at `index` (no-op if out of range)."""
+        """Play the queued track at `index` (no-op if out of range). The backend
+        moves within the loaded list, so the queue isn't reloaded."""
         if 0 <= index < len(self.queue):
-            self.backend.play_tracks([t["path"] for t in self.queue],
-                                     album_path=self.album_path, start=index)
+            self.backend.jump_to(index)
 
     @property
     def index(self):
@@ -144,21 +162,37 @@ class QueuePlayer:
 
     # --- session persistence (resume on launch) ---
 
-    def save_state(self, path):
+    def save_state(self, path=None):
+        """Write the session (queue, position, shuffle, repeat) to `path`, or to
+        the autosave path. Written to a temporary file and renamed, so a crash
+        mid-write can't leave a truncated session behind."""
+        path = path or self._autosave_path
+        if not path:
+            return
         try:
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             state = {
-                "queue": self.queue,
+                "queue": list(self.queue),
                 "index": self.index,
                 "offset": self.backend.get_current_time(),
                 "album_path": self.album_path,
                 "shuffle": self.shuffle,
                 "repeat": self.repeat,
             }
-            with open(path, "w") as f:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            tmp = f"{path}.tmp"
+            with open(tmp, "w") as f:
                 json.dump(state, f)
-        except Exception:
-            pass
+            os.replace(tmp, path)
+        except Exception as e:               # saving must never break playback
+            log.warning("could not save the session to %s: %s", path, e)
+
+    def enable_autosave(self, path):
+        """Save the session whenever playback starts, stops, the track changes or
+        the queue is edited, not only on a clean exit, so a crash or a killed
+        process resumes close to where it was."""
+        self._autosave_path = path
+        for event in ("play_start", "track_change", "stop", "queue_change"):
+            self.backend.on(event, self.save_state)
 
     def shutdown(self):
         self.backend.shutdown()

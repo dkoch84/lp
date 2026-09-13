@@ -7,22 +7,34 @@ specular shine fixed. Identical pipeline to the legacy `vinyl_widget`, repackage
 for the scene graph.
 
 It drives itself off the Controller: set `controller`, and it rebuilds + spins on
-each now-playing change. pygame runs headless (SDL dummy) purely to rasterize.
+each now-playing change that alters what it draws. The record renders on a
+background thread (the previous disc keeps spinning meanwhile), so a slow style
+never freezes the window. pygame runs headless (SDL dummy) purely to rasterize.
 """
+import json
+import logging
 import os
+import threading
+import weakref
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
 import pygame
-from PySide6.QtCore import Property, QObject, QRectF, QTimer, Signal
+from PySide6.QtCore import Property, QObject, QRectF, QTimer, Signal, Slot
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtQuick import QQuickPaintedItem
+
+from shiboken6 import isValid
 
 from lpcore.vinyl.render import VinylRenderer
 from lpcore.vinyl.settings import VinylSettings
 
 _PYGAME_READY = False
+# pygame isn't thread-safe: every render (the record here, the chooser's
+# swatches in vinyl_preview) holds this lock.
+RENDER_LOCK = threading.Lock()
+log = logging.getLogger("lpdeck.vinyl")
 
 
 def _ensure_pygame():
@@ -31,6 +43,37 @@ def _ensure_pygame():
         pygame.init()
         pygame.font.init()
         _PYGAME_READY = True
+
+
+class _RenderRelay(QObject):
+    """Carries finished renders from worker threads to the window's thread.
+
+    A render can finish after its VinylItem is gone (the view closed mid-render).
+    Emitting on the item itself then touched a destroyed object and crashed the
+    app, so results travel through this long-lived relay, which holds only a weak
+    reference and drops results for items that no longer exist."""
+    done = Signal(object, int, object, object)   # weakref to item, generation, disc, shine
+
+    def __init__(self):
+        super().__init__()
+        self.done.connect(self._deliver)
+
+    @Slot(object, int, object, object)
+    def _deliver(self, ref, generation, disc, shine):
+        item = ref()
+        if item is not None and isValid(item):
+            item._on_rendered(generation, disc, shine)
+
+
+_relay = None
+
+
+def _render_relay():
+    """The relay, created on first use from the window's thread."""
+    global _relay
+    if _relay is None:
+        _relay = _RenderRelay()
+    return _relay
 
 
 def _surface_to_qimage(surf):
@@ -90,6 +133,8 @@ class VinylItem(QQuickPaintedItem):
         self._timer = QTimer(self)
         self._timer.setInterval(33)   # ~30fps
         self._timer.timeout.connect(self._tick)
+        self._generation = 0             # bumps per render request; stale results are dropped
+        self._shown_key = None           # what the current (or pending) disc was built from
 
     # --- QML property: the Controller drives the look + spin ---
 
@@ -119,10 +164,17 @@ class VinylItem(QQuickPaintedItem):
             return
         spec = c.vinyl_now()             # current track's album context (+ playlist)
         if spec and spec["album_path"]:
-            self.set_settings(spec["settings"])
-            self.set_album(spec["album_path"], list(backend.track_boundaries),
-                           backend.album_duration, spec["art_path"],
-                           spec["artist"], spec["album"])
+            boundaries = list(backend.track_boundaries)
+            # Now-playing changes for many reasons (a heart toggled, the queue
+            # footer); only rebuild when something the record shows is different.
+            key = (spec["album_path"], json.dumps(spec["settings"].to_dict(), sort_keys=True),
+                   tuple(boundaries), round(float(backend.album_duration or 0), 3),
+                   spec["art_path"], spec["artist"], spec["album"])
+            if key != self._shown_key:
+                self._shown_key = key
+                self.set_settings(spec["settings"])
+                self.set_album(spec["album_path"], boundaries, backend.album_duration,
+                               spec["art_path"], spec["artist"], spec["album"])
         self.set_spinning(True)
 
     # --- build / state ---
@@ -133,9 +185,30 @@ class VinylItem(QQuickPaintedItem):
 
     def set_album(self, album_path, boundaries, album_dur, art_path=None,
                   artist=None, album=None):
-        self._disc, self._shine = composite_disc(
-            self._renderer, RENDER_R, boundaries, album_dur, art_path,
-            album_path, artist, album, with_shine=True)
+        """Render the record on a background thread; the disc already showing
+        keeps spinning until the new one arrives."""
+        self._generation += 1
+        generation, renderer = self._generation, self._renderer
+        relay, ref = _render_relay(), weakref.ref(self)
+
+        def work():
+            try:
+                with RENDER_LOCK:
+                    _ensure_pygame()
+                    disc, shine = composite_disc(renderer, RENDER_R, boundaries, album_dur,
+                                                 art_path, album_path, artist, album,
+                                                 with_shine=True)
+            except Exception as e:
+                log.warning("vinyl render failed for %s: %s", album_path, e)
+                return
+            relay.done.emit(ref, generation, disc, shine)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_rendered(self, generation, disc, shine):
+        if generation != self._generation:
+            return                           # a newer render was requested meanwhile
+        self._disc, self._shine = disc, shine
         self.update()
 
     def set_spinning(self, on):

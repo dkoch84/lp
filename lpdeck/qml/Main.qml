@@ -85,8 +85,18 @@ ApplicationWindow {
     function openGenre(name) {
         stack.push(songsPage, { "genreName": name, "headerTitle": name })
     }
+    // Typing shows the search page at once, but the query (and the database
+    // search it drives) waits until typing pauses, instead of running per key.
+    property string pendingQuery: ""
+    Timer {
+        id: searchDebounce
+        interval: 200
+        onTriggered: win.query = win.pendingQuery
+    }
     function onSearch(t) {
-        win.query = t
+        win.pendingQuery = t
+        if (t.length === 0) { searchDebounce.stop(); win.query = "" }
+        else searchDebounce.restart()
         if (t.length > 0 && section !== "search") {
             section = "search"; stack.replace(null, searchPage)
         } else if (t.length === 0 && section === "search") {

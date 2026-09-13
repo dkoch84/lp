@@ -4,15 +4,12 @@ Renders a small, art-less vinyl disc for a (style, label) pair so the picker
 shows *what you're choosing*. Reuses lpcore's VinylRenderer and the shared
 `composite_disc` (so grooves blend exactly like lp's display). pygame isn't
 thread-safe and the image provider runs on scene-graph worker threads, so all
-rendering is serialised behind a lock; results are disk-cached.
+rendering is serialised behind the lock the playing record also takes;
+results are disk-cached.
 """
-import threading
-
 from lpcore.vinyl.render import VinylRenderer
 from lpcore.vinyl.settings import VinylSettings
-from .vinyl_item import _ensure_pygame, composite_disc
-
-_LOCK = threading.Lock()
+from .vinyl_item import RENDER_LOCK as _LOCK, _ensure_pygame, composite_disc
 _BOUNDS = [0, 80, 160, 240]      # a few fake tracks so grooves have gaps
 _DUR = 240.0
 

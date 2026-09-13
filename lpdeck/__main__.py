@@ -55,7 +55,7 @@ def main():
     # ReplayGain mode is instance-level in libVLC, so it must be set before the
     # backend is built. Read the persisted UI choice directly (QSettings works
     # with an explicit org/app pair, no QApplication needed yet).
-    from PySide6.QtCore import QSettings
+    from PySide6.QtCore import QSettings, QTimer
     rg = str(QSettings("lp-deck", "lp-deck").value("replaygainMode", "none"))
     backend = PlayerBackend(audio_output=config.get("audio_output", "alsa"),
                             replaygain=rg)
@@ -68,6 +68,13 @@ def main():
 
     def on_ready(controller):
         _restore_session(player)               # resume last session (paused)
+        # Save the session as playback happens, and every 30 s for the position,
+        # so a crash or kill doesn't lose it (the finally below covers clean exits).
+        player.enable_autosave(STATE_PATH)
+        autosave = QTimer(controller)
+        autosave.setInterval(30000)
+        autosave.timeout.connect(lambda: player.save_state(STATE_PATH))
+        autosave.start()
         # A folder picked in Settings wins over config.yml (which the kiosk shares).
         chosen = str(QSettings("lp-deck", "lp-deck").value("musicFolder", "") or "")
         folder = chosen if chosen and os.path.isdir(chosen) else music_path

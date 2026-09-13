@@ -12,9 +12,9 @@ import subprocess
 import threading
 import time
 
-from PySide6.QtCore import (Property, QAbstractListModel, QModelIndex, QObject, QUrl,
+from PySide6.QtCore import (Property, QAbstractListModel, QModelIndex, QObject, QSize, QUrl,
                             QSettings, Qt, QTimer, Signal, Slot)
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QImageReader
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 from PySide6.QtQuick import QQuickImageProvider
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -218,10 +218,25 @@ class QueueModel(QAbstractListModel):
         self._cur = -1
 
     def reload(self):
-        self.beginResetModel()
-        self._rows = list(self.player.queue)
-        self._cur = self.player.index
-        self.endResetModel()
+        """Refresh from the player. When only the playing row moved (the usual
+        case: a track change), update those two rows instead of resetting the
+        whole list, which would lose the view's scroll position."""
+        rows = list(self.player.queue)
+        cur = self.player.index
+        same = (len(rows) == len(self._rows)
+                and all(a is b or a.get("path") == b.get("path")
+                        for a, b in zip(rows, self._rows)))
+        if not same:
+            self.beginResetModel()
+            self._rows, self._cur = rows, cur
+            self.endResetModel()
+            return
+        self._rows = rows
+        old, self._cur = self._cur, cur
+        for row in sorted({old, cur}):
+            if 0 <= row < len(rows):
+                i = self.index(row, 0)
+                self.dataChanged.emit(i, i, [self.CurrentRole])
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._rows)
@@ -537,11 +552,10 @@ class Controller(QObject):
 
     @Slot(int, str)
     def addAlbumToPlaylist(self, playlist_id, album_path):
-        for r in self.con.execute(
-                "SELECT t.id FROM tracks t JOIN albums al ON al.id=t.album_id "
-                "WHERE al.path=? ORDER BY t.disc_no, t.track_no, t.title",
-                (album_path,)):
-            db.append_to_playlist(self.con, playlist_id, r["id"])
+        ids = [r["id"] for r in self.con.execute(
+            "SELECT t.id FROM tracks t JOIN albums al ON al.id=t.album_id "
+            "WHERE al.path=? ORDER BY t.disc_no, t.track_no, t.title", (album_path,))]
+        db.append_many_to_playlist(self.con, playlist_id, ids)
         self.playlistsChanged.emit()
 
     @Slot(int, int)
@@ -594,10 +608,28 @@ class Controller(QObject):
     @Slot(str, str, str, str, str)
     def saveMetadata(self, path, title, artist, album, track):
         if meta.write(path, title=title, artist=artist, album=album, track=track):
-            # keep the index in step with the edited tags
-            self.con.execute("UPDATE tracks SET title=?, track_no=? WHERE path=?",
-                             (title, int(track) if track.isdigit() else 0, path))
+            # Keep the index in step with the edited tags. Artist and album come
+            # from the folders in this library, so only title and track number
+            # live in the database; recording the new modified time stops the
+            # next scan re-reading a file that's already up to date.
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                mtime = 0
+            self.con.execute("UPDATE tracks SET title=?, track_no=?, mtime=? WHERE path=?",
+                             (title, int(track) if track.isdigit() else 0, mtime, path))
             self.con.commit()
+            backend = self.player.backend
+            if hasattr(backend, "invalidate_metadata"):
+                backend.invalidate_metadata(path)
+            for t in self.player.queue:
+                if t.get("path") == path:
+                    t["title"] = title
+            cur = self._current_track()
+            if cur and cur.get("path") == path:
+                self._np_title = title
+                self.nowPlayingChanged.emit()
+            self.queue.reload()
             self.songsChanged.emit()
 
     # --- playback ---
@@ -804,21 +836,24 @@ class Controller(QObject):
                     (album_id,))]
 
     def _track_dicts_for_paths(self, paths):
-        out = []
-        for p in paths:
-            r = self.con.execute(
-                "SELECT t.title, t.track_no, t.duration, t.path, t.album_id, "
-                "t.artist_id, al.path AS album_path, al.name AS album_name, "
-                "ar.name AS artist FROM tracks t "
-                "JOIN albums al ON al.id=t.album_id "
-                "JOIN artists ar ON ar.id=t.artist_id WHERE t.path=?", (p,)).fetchone()
-            if r:
-                out.append({"title": r["title"], "track_no": r["track_no"],
-                            "path": r["path"], "duration": r["duration"],
-                            "artist": r["artist"], "album_path": r["album_path"],
-                            "album_id": r["album_id"], "artist_id": r["artist_id"],
-                            "album_name": r["album_name"]})
-        return out
+        """Track dicts for `paths`, in the given order (unknown paths dropped):
+        one query per chunk of paths rather than one per path."""
+        found = {}
+        for i in range(0, len(paths), 500):
+            chunk = paths[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for r in self.con.execute(
+                    "SELECT t.title, t.track_no, t.duration, t.path, t.album_id, "
+                    "t.artist_id, al.path AS album_path, al.name AS album_name, "
+                    "ar.name AS artist FROM tracks t "
+                    "JOIN albums al ON al.id=t.album_id "
+                    f"JOIN artists ar ON ar.id=t.artist_id WHERE t.path IN ({marks})", chunk):
+                found[r["path"]] = {"title": r["title"], "track_no": r["track_no"],
+                                    "path": r["path"], "duration": r["duration"],
+                                    "artist": r["artist"], "album_path": r["album_path"],
+                                    "album_id": r["album_id"], "artist_id": r["artist_id"],
+                                    "album_name": r["album_name"]}
+        return [dict(found[p]) for p in paths if p in found]
 
     @Slot(int, bool)
     def queueAlbum(self, album_id, play_next):
@@ -1114,13 +1149,23 @@ class Controller(QObject):
     # --- now-playing (properties read by QML) ---
 
     def _refresh_now_playing(self):
-        st = self.player.backend.get_status()
-        if st.get("playing"):
-            self._np_title = st.get("track_title") or ""
-            self._np_sub = " — ".join(
-                x for x in (st.get("artist"), st.get("album")) if x)
+        backend = self.player.backend
+        cur = self._current_track()
+        loaded = (backend.is_loaded() if hasattr(backend, "is_loaded")
+                  else bool(backend.get_status().get("playing")))
+        if loaded:
+            if cur:
+                # the library already has these, so the file's tags aren't re-read
+                self._np_title = cur.get("title") or os.path.splitext(
+                    os.path.basename(cur.get("path") or ""))[0]
+                self._np_sub = " — ".join(
+                    x for x in (cur.get("artist"), cur.get("album_name")) if x)
+            else:
+                st = backend.get_status()
+                self._np_title = st.get("track_title") or ""
+                self._np_sub = " — ".join(
+                    x for x in (st.get("artist"), st.get("album")) if x)
             # follow the current track's album (so playlists get art + vinyl too)
-            cur = self._current_track()
             if cur:
                 self._np_album_id = cur.get("album_id", -1)
                 self._np_artist_id = cur.get("artist_id", -1)
@@ -1145,7 +1190,10 @@ class Controller(QObject):
         accent = "#E0A24C"
         art = self.player.backend.find_album_art(album_path) if album_path else None
         if art:
-            img = QImage(art)
+            # decode a thumbnail, not the full-size cover: only its average colour is used
+            reader = QImageReader(art)
+            reader.setScaledSize(QSize(24, 24))
+            img = reader.read()
             if not img.isNull():
                 px = img.scaled(1, 1, Qt.IgnoreAspectRatio,
                                 Qt.SmoothTransformation).pixelColor(0, 0)
@@ -1171,6 +1219,13 @@ class Controller(QObject):
 
     # --- queue footer (req #3): N/M remaining, time remaining/total ---
 
+    def _progress(self):
+        """Queue progress, without the tag read get_status() would do."""
+        backend = self.player.backend
+        if hasattr(backend, "get_album_progress"):
+            return backend.get_album_progress() or {}
+        return (backend.get_status() or {}).get("progress", {})
+
     @Property(int, notify=queueChanged)
     def queueCount(self):
         return len(self.player.queue)
@@ -1182,12 +1237,12 @@ class Controller(QObject):
 
     @Property(str, notify=progressChanged)
     def timeRemaining(self):
-        prog = (self.player.backend.get_status() or {}).get("progress", {})
+        prog = self._progress()
         return _mmss(prog.get("album_duration", 0) - prog.get("elapsed", 0))
 
     @Property(str, notify=progressChanged)
     def timeTotal(self):
-        prog = (self.player.backend.get_status() or {}).get("progress", {})
+        prog = self._progress()
         total = prog.get("album_duration") or sum(
             t.get("duration") or 0 for t in self.player.queue)
         return _mmss(total)
@@ -1195,13 +1250,13 @@ class Controller(QObject):
     @Property(float, notify=progressChanged)
     def npPosition(self):
         """0–1 progress through the current queue (for the seek/progress bar)."""
-        prog = (self.player.backend.get_status() or {}).get("progress", {})
+        prog = self._progress()
         total = prog.get("album_duration", 0)
         return (prog.get("elapsed", 0) / total) if total else 0.0
 
     @Property(str, notify=progressChanged)
     def timeElapsed(self):
-        prog = (self.player.backend.get_status() or {}).get("progress", {})
+        prog = self._progress()
         return _mmss(prog.get("elapsed", 0))
 
     # --- view settings (sort + grid size + theme; persisted) ---
