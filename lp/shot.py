@@ -10,6 +10,7 @@ album: the SDL2 renderer works fine under the dummy video driver, including
     python -m lp.shot out.png
     python -m lp.shot out.png --title "A Very Long Song Title That Will Not Fit"
     python -m lp.shot out.png --track 7 --of 12 --size 1920x1080 --art cover.jpg
+    python -m lp.shot out.png --style nebula-marble --label art
 
 The album art defaults to a generated placeholder, so the harness needs nothing
 from a real library. `--art` takes a real cover when you want to eyeball
@@ -29,6 +30,7 @@ from pygame._sdl2 import video as sdl2_video
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lp.display import Display
+from lpcore.vinyl.settings import VinylSettings
 
 
 class _FakePlayer:
@@ -71,6 +73,14 @@ def main(argv=None):
     ap.add_argument('--art', default=None, help='cover image (default: generated)')
     ap.add_argument('--elapsed', type=float, default=0.42,
                     help='fraction of the album played, for needle position')
+    ap.add_argument('--style', default=VinylSettings.style,
+                    help='vinyl style id, as the web picker sends (e.g. nebula-marble)')
+    ap.add_argument('--label', default=VinylSettings.label,
+                    help='label id (e.g. art, label-white, color-cyan)')
+    ap.add_argument('--effects', default='',
+                    help='comma-separated Vinyl Effects (e.g. glass,rim-light)')
+    ap.add_argument('--grooves', default='auto',
+                    help='groove treatment: auto, shine, shadow or smooth')
     args = ap.parse_args(argv)
 
     width, height = (int(v) for v in args.size.lower().split('x'))
@@ -84,7 +94,12 @@ def main(argv=None):
                                             '_shot_art.png'))
 
     config = {'display': {'width': width, 'height': height, 'fullscreen': False}}
-    display = Display(config, _FakePlayer(art, None), port=0)
+    settings = VinylSettings(style=args.style, label=args.label).update(
+        effects=[e for e in args.effects.split(',') if e], grooves=args.grooves)
+    # A non-empty album path is required: VinylRenderer.get_vinyl_style()
+    # resolves no style for a falsy path and the disc silently renders black.
+    display = Display(config, _FakePlayer(art, '/lp-shot/album'), port=0,
+                      settings=settings)
 
     display.window = sdl2_video.Window('lp-shot', size=(width, height), hidden=True)
     display.renderer = sdl2_video.Renderer(display.window, accelerated=0)

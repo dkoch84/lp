@@ -653,6 +653,55 @@
       return section;
     }
 
+    function renderEffects(state) {
+      const section = document.createElement('div');
+      section.className = 'slider-section';
+      const h2 = document.createElement('h2'); h2.textContent = 'Effects';
+      section.appendChild(h2);
+      const chosen = new Set(state.effects);
+      for (const opt of state.options) {
+        const row = document.createElement('label');
+        row.className = 'effect-row';
+        row.style.display = 'block';
+        row.style.margin = '8px 0';
+        row.style.cursor = 'pointer';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.value = opt.id;
+        box.checked = chosen.has(opt.id);
+        box.addEventListener('change', () => {
+          if (box.checked) chosen.add(opt.id); else chosen.delete(opt.id);
+          post('/api/settings/effects', { effects: [...chosen] });
+        });
+        row.appendChild(box);
+        row.appendChild(document.createTextNode(' ' + opt.label));
+        section.appendChild(row);
+      }
+
+      const grooves = document.createElement('h3');
+      grooves.textContent = 'Grooves';
+      section.appendChild(grooves);
+      for (const opt of state.groove_options) {
+        const row = document.createElement('label');
+        row.className = 'groove-row';
+        row.style.display = 'inline-block';
+        row.style.margin = '6px 14px 6px 0';
+        row.style.cursor = 'pointer';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'grooves';
+        radio.value = opt.id;
+        radio.checked = opt.id === state.grooves;
+        radio.addEventListener('change', () => {
+          if (radio.checked) post('/api/settings/effects', { grooves: opt.id });
+        });
+        row.appendChild(radio);
+        row.appendChild(document.createTextNode(' ' + opt.label));
+        section.appendChild(row);
+      }
+      return section;
+    }
+
     const MODE_LABELS = { none: 'None', curved: 'Curved', straight: 'Straight', blocky: 'Blocky' };
     const setLT = (patch) => post('/api/settings/label-text', patch);
     const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -785,13 +834,14 @@
     // --- Init ---
 
     async function init() {
-      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes] = await Promise.all([
+      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes, effectsRes] = await Promise.all([
         api('/api/settings/vinyl'),
         api('/api/settings/vinyl/options'),
         api('/api/settings/label'),
         api('/api/settings/brightness'),
         api('/api/settings/lastfm'),
         api('/api/settings/label-text/options'),
+        api('/api/settings/effects'),
       ]);
       currentStyle = styleRes.style;
       currentLabel = labelRes.label;
@@ -815,6 +865,7 @@
 
       renderGalleries();
       controlsRoot.appendChild(renderLabelText(labelTextRes));
+      controlsRoot.appendChild(renderEffects(effectsRes));
       controlsRoot.appendChild(renderBrightness(brightRes.brightness));
       controlsRoot.appendChild(renderLastfm(lastfmRes));
     }

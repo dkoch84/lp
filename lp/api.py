@@ -32,6 +32,11 @@ class LabelTextRequest(BaseModel):
     decor2_color: str = None
 
 
+class EffectsRequest(BaseModel):
+    effects: list[str] | None = None
+    grooves: str | None = None
+
+
 class BrightnessRequest(BaseModel):
     brightness: int
 
@@ -464,6 +469,29 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"brightness": settings.brightness}
+
+    # --- Vinyl Effects (finishes over any style) ---
+
+    @app.get("/api/settings/effects")
+    def get_effects():
+        from lpcore.vinyl.catalog import GROOVE_TREATMENTS, VINYL_EFFECTS
+        return {"effects": settings.effects,
+                "options": [{"id": k, "label": v} for k, v in VINYL_EFFECTS.items()],
+                "grooves": settings.grooves,
+                "groove_options": [{"id": k, "label": v} for k, v in GROOVE_TREATMENTS.items()]}
+
+    @app.post("/api/settings/effects")
+    def set_effects(req: EffectsRequest):
+        changes = {"effects": req.effects, "grooves": req.grooves}
+        try:
+            # validate everything first, so a bad value applies nothing
+            for key, value in changes.items():
+                if value is not None:
+                    VinylSettings._validate(key, value)
+            settings.update(**changes)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"effects": settings.effects, "grooves": settings.grooves}
 
     # --- Library management ---
 

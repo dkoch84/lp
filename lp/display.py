@@ -534,6 +534,7 @@ class Display:
                     self.settings.artist_color, self.settings.album_color,
                     self.settings.decor1, self.settings.decor1_color,
                     self.settings.decor2, self.settings.decor2_color,
+                    tuple(self.settings.effects),
                     status.get('artist'), status.get('album'))
         if body_key != self._record_texture_key:
             self._record_texture_key = body_key
@@ -546,7 +547,7 @@ class Display:
         # rotated with the body. Avoids moiré from sampling dense rings.
         style = self.vinyl.get_vinyl_style(album_path) or {'type': 'black'}
         grooves_key = (style.get('type'), style.get('color'), style.get('variant'),
-                       self.settings.brightness, record_size, tuple(boundaries))
+                       self.settings.brightness, self.settings.grooves, record_size, tuple(boundaries))
         if grooves_key != self._grooves_texture_key:
             self._grooves_texture_key = grooves_key
             grooves_surf, blend_mode = self.vinyl.build_grooves_overlay(record_size, style, boundaries, album_dur)
