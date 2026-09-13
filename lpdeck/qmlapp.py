@@ -16,6 +16,7 @@ from PySide6.QtCore import (Property, QAbstractListModel, QFileSystemWatcher, QM
                             QObject, QSize, QUrl,
                             QSettings, Qt, QTimer, Signal, Slot)
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QImageReader
+from PySide6.QtWidgets import QApplication
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 from PySide6.QtQuick import QQuickImageProvider
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -25,11 +26,59 @@ from lpcore.vinyl.catalog import (LABEL_COLORS, MANDELBROT_VARIANTS,
 from lpcore.vinyl.fractals import NEBULA_VARIANTS
 from lpcore.vinyl.settings import VinylSettings
 from lpcore import lyrics as lyrics_mod
+from lpcore.tracks import is_audio, natural_key
 from . import db, meta, mosaic, vinyl_preview
-from . import indexer
+from . import indexer, playlist_files
+from . import search as search_mod
+from . import smart as smart_mod
 from .vinyl_item import VinylItem
 
 QML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml")
+
+FADE_ON_PAUSE_MS = 350
+
+
+def _local_file(value):
+    """A local path from a QUrl, a file:// string or a plain path."""
+    if isinstance(value, QUrl):
+        return value.toLocalFile()
+    value = str(value or "")
+    return QUrl(value).toLocalFile() if value.startswith("file:") else value
+
+
+SMART_FIELDS = [
+    {"field": "artist", "label": "Artist", "type": "text"},
+    {"field": "album", "label": "Album", "type": "text"},
+    {"field": "title", "label": "Title", "type": "text"},
+    {"field": "genre", "label": "Genre", "type": "text"},
+    {"field": "year", "label": "Year", "type": "number"},
+    {"field": "rating", "label": "Rating", "type": "number"},
+    {"field": "plays", "label": "Play count", "type": "number"},
+    {"field": "length", "label": "Length (seconds)", "type": "number"},
+    {"field": "added", "label": "Added", "type": "date"},
+    {"field": "last_played", "label": "Last played", "type": "date"},
+    {"field": "favorite", "label": "Favourite", "type": "bool"},
+]
+SMART_OPS = {
+    "text": [{"op": "contains", "label": "contains"},
+             {"op": "not_contains", "label": "doesn't contain"},
+             {"op": "is", "label": "is"},
+             {"op": "is_not", "label": "is not"},
+             {"op": "starts_with", "label": "starts with"}],
+    "number": [{"op": "=", "label": "is"}, {"op": "!=", "label": "is not"},
+               {"op": ">", "label": "more than"}, {"op": ">=", "label": "at least"},
+               {"op": "<", "label": "less than"}, {"op": "<=", "label": "at most"}],
+    "date": [{"op": "in_last_days", "label": "in the last (days)"},
+             {"op": "not_in_last_days", "label": "not in the last (days)"},
+             {"op": "never", "label": "never"}],
+    "bool": [{"op": "is_true", "label": "yes"}, {"op": "is_false", "label": "no"}],
+}
+SMART_SORTS = [
+    {"value": "artist", "label": "Artist"}, {"value": "title", "label": "Title"},
+    {"value": "year", "label": "Newest"}, {"value": "added", "label": "Recently added"},
+    {"value": "played", "label": "Recently played"}, {"value": "plays", "label": "Most played"},
+    {"value": "rating", "label": "Rating"}, {"value": "random", "label": "Random"},
+]
 
 # 10-band equalizer preset curves (dB per band at 31.25…16000 Hz). libVLC's own
 # new-from-preset ctor segfaults in this python-vlc build, so we ship our own.
@@ -332,6 +381,22 @@ class Controller(QObject):
         # applied at backend construction; here we only persist the chosen value.
         self._replaygain = str(self._settings.value("replaygainMode", "none"))
 
+        # fade out on pause and back in on resume; the audio device to play through
+        self._fade_on_pause = self._bool_setting("fadeOnPause", False)
+        self._apply_fade()
+        self._output_device = str(self._settings.value("outputDevice", "") or "")
+        if self._output_device and hasattr(self.player.backend, "set_output_device"):
+            self.player.backend.set_output_device(self._output_device)
+
+        # desktop integration; run() attaches the tray and the sleep inhibitor
+        self.desktop = None
+        self.inhibitor = None
+        self._show_tray = self._bool_setting("showTray", True)
+        self._close_to_tray = self._bool_setting("closeToTray", False)
+        self._notify_tracks = self._bool_setting("notifyTrackChange", False)
+        self._keep_awake = self._bool_setting("keepAwake", True)
+        self._notified_path = None
+
         # lyrics for the now-playing track (synced .lrc / embedded / .txt)
         self._lyrics = {"synced": False, "lines": [], "source": ""}
 
@@ -366,7 +431,20 @@ class Controller(QObject):
         self._ticker = QTimer(self)
         self._ticker.setInterval(1000)
         self._ticker.timeout.connect(self.progressChanged)
+        self._ticker.timeout.connect(self._update_awake)
         self._ticker.start()
+
+    def _bool_setting(self, key, default):
+        return str(self._settings.value(key, "true" if default else "false")).lower() == "true"
+
+    def attach_desktop(self, desktop, inhibitor):
+        """Hook up the tray icon and the sleep inhibitor (run() does this)."""
+        self.desktop = desktop
+        self.inhibitor = inhibitor
+        if desktop is not None:
+            desktop.set_visible(self._show_tray)
+        self.settingsChanged.emit()
+        self._update_awake()
 
     # --- music library folder ---
 
@@ -545,20 +623,34 @@ class Controller(QObject):
 
     @Slot(str, result="QVariantMap")
     def search(self, q):
-        q = (q or "").strip()
-        if not q:
+        """Artists, albums and songs for a search. Words match names and titles;
+        artist:, album:, title:, genre: and year: narrow by one field."""
+        parsed = search_mod.parse(q)
+        if search_mod.is_empty(parsed):
             return {"artists": [], "albums": [], "songs": []}
-        like = f"%{q}%"
-        artists = [{"id": r["id"], "name": r["name"]} for r in self.con.execute(
-            "SELECT id, name FROM artists WHERE missing=0 AND name LIKE ? "
-            "ORDER BY sort_name LIMIT 24", (like,))]
-        albums = [{"id": r["id"], "name": r["name"], "year": r["year"],
-                   "artist": r["artist"],
-                   "coverUrl": f"image://tiles/album/{r['id']}"}
-                  for r in self.con.execute(
-                      "SELECT al.id, al.name, al.year, ar.name AS artist "
-                      "FROM albums al JOIN artists ar ON ar.id=al.artist_id "
-                      "WHERE al.missing=0 AND al.name LIKE ? ORDER BY al.name LIMIT 24", (like,))]
+        artists, albums = [], []
+        found = search_mod.artist_filter(parsed)
+        if found:
+            where, params = found
+            artists = [{"id": r["id"], "name": r["name"]} for r in self.con.execute(
+                f"SELECT id, name FROM artists WHERE missing=0 AND ({where}) "
+                "ORDER BY sort_name LIMIT 24", params)]
+        found = search_mod.album_filter(parsed)
+        if found:
+            where, params = found
+            albums = [{"id": r["id"], "name": r["name"], "year": r["year"],
+                       "artist": r["artist"],
+                       "coverUrl": f"image://tiles/album/{r['id']}"}
+                      for r in self.con.execute(
+                          "SELECT al.id, al.name, al.year, ar.name AS artist "
+                          "FROM albums al JOIN artists ar ON ar.id=al.artist_id "
+                          f"WHERE al.missing=0 AND ({where}) "
+                          "ORDER BY ar.sort_name, al.year, al.name LIMIT 48", params)]
+        where, params = search_mod.song_filter(parsed)
+        # plain words list songs by title; field filters list them in album order
+        fields_used = any(parsed[k] for k in parsed if k != "words")
+        order = ("ar.sort_name, al.year, al.name, t.disc_no, t.track_no"
+                 if fields_used else "t.title")
         # a song's index within its album (matches the album's track ordering)
         songs = [{"albumId": r["album_id"], "index": r["idx"], "title": r["title"],
                   "artist": r["artist"], "album": r["album"],
@@ -571,8 +663,21 @@ class Controller(QObject):
                      "   < (t.disc_no, t.track_no, t.title)) AS idx "
                      "FROM tracks t JOIN artists ar ON ar.id=t.artist_id "
                      "JOIN albums al ON al.id=t.album_id "
-                     "WHERE t.missing=0 AND t.title LIKE ? ORDER BY t.title LIMIT 60", (like,))]
+                     f"WHERE t.missing=0 AND ({where}) ORDER BY {order} LIMIT 200", params)]
         return {"artists": artists, "albums": albums, "songs": songs}
+
+    @Slot(result="QVariantList")
+    def allAlbums(self):
+        """Every album, as cards with their artist, in the album sort order."""
+        order = {"year": "al.year, al.name", "name": "al.name COLLATE NOCASE, al.year"}.get(
+            self._album_sort, "al.year, al.name")
+        return [{"id": al["id"], "name": al["name"], "year": al["year"],
+                 "artist": al["artist"], "path": al["path"],
+                 "coverUrl": f"image://tiles/album/{al['id']}"}
+                for al in self.con.execute(
+                    "SELECT al.id, al.name, al.year, al.path, ar.name AS artist "
+                    "FROM albums al JOIN artists ar ON ar.id=al.artist_id "
+                    f"WHERE al.missing=0 ORDER BY {order}")]
 
     # --- playlists (req #1) ---
 
@@ -817,6 +922,7 @@ class Controller(QObject):
             self.transportChanged.emit()
         if event in ("paused", "resumed", "stopped_after"):
             self.progressChanged.emit()
+            QTimer.singleShot(FADE_ON_PAUSE_MS + 100, self._update_awake)
         self.queue.reload()
         self.queueChanged.emit()
 
@@ -1136,7 +1242,8 @@ class Controller(QObject):
     @Slot(str, result="QVariantList")
     def smartList(self, kind):
         fn = {"favorites": db.favorites, "recent": db.recently_played,
-              "most": db.most_played, "added": db.recently_added}.get(kind)
+              "most": db.most_played, "added": db.recently_added,
+              "all": db.all_tracks}.get(kind)
         return self._rows_to_songtable(fn(self.con)) if fn else []
 
     @Slot(result="QVariantList")
@@ -1164,6 +1271,326 @@ class Controller(QObject):
         db.remove_playlist_position(self.con, playlist_id, position)
         self.playlistsChanged.emit()
         self.songsChanged.emit()
+
+    # --- playlist files (import and export) ---
+
+    def _track_id_for_entry(self, path):
+        """The library track for a playlist entry: by exact path, or when the
+        playlist came from another computer, by its artist/album/file ending
+        (only when exactly one track matches)."""
+        tid = db.track_id_for_path(self.con, path)
+        if tid is not None:
+            return tid
+        parts = path.replace("\\", "/").split("/")
+        for n in (3, 2):
+            if len(parts) < n:
+                continue
+            tail = "/" + "/".join(parts[-n:])
+            like = "%" + tail.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            rows = self.con.execute(
+                "SELECT id FROM tracks WHERE path LIKE ? ESCAPE '\\' LIMIT 2", (like,)).fetchall()
+            if len(rows) == 1:
+                return rows[0]["id"]
+        return None
+
+    @Slot("QVariant", result=int)
+    def importPlaylist(self, file_url):
+        """Make a playlist from an M3U, PLS or XSPF file. Entries that aren't in
+        the library are left out and counted in the notice."""
+        path = _local_file(file_url)
+        try:
+            entries = playlist_files.read_playlist(path)
+        except Exception as e:                       # unreadable, unknown type, bad XML
+            self._set_notice(f"Couldn't import {os.path.basename(path)}: {e}")
+            return -1
+        ids = [tid for tid in (self._track_id_for_entry(e["path"]) for e in entries)
+               if tid is not None]
+        name = os.path.splitext(os.path.basename(path))[0] or "Imported playlist"
+        if not ids:
+            self._set_notice(f"None of the songs in \u201c{name}\u201d are in your library.")
+            return -1
+        playlist_id = db.create_playlist(self.con, name)
+        db.append_many_to_playlist(self.con, playlist_id, ids)
+        left_out = len(entries) - len(ids)
+        extra = f" ({left_out} not in your library)" if left_out else ""
+        self._set_notice(f"Imported \u201c{name}\u201d: {len(ids)} songs{extra}.")
+        self.playlistsChanged.emit()
+        return playlist_id
+
+    def _write_playlist_file(self, file_url, name, tracks):
+        path = _local_file(file_url)
+        if not playlist_files.format_for(path):
+            path += ".m3u8"
+        try:
+            playlist_files.write_playlist(path, tracks)
+        except OSError as e:
+            self._set_notice(f"Couldn't save {os.path.basename(path)}: {e.strerror or e}")
+            return False
+        self._set_notice(f"Saved \u201c{name}\u201d to {os.path.basename(path)}.")
+        return True
+
+    @Slot(int, "QVariant", result=bool)
+    def exportPlaylist(self, playlist_id, file_url):
+        row = self.con.execute("SELECT name FROM playlists WHERE id=?", (playlist_id,)).fetchone()
+        tracks = [dict(r) for r in self.con.execute(
+            "SELECT t.title, t.duration, t.path, ar.name AS artist "
+            "FROM playlist_tracks pt JOIN tracks t ON t.id=pt.track_id "
+            "JOIN artists ar ON ar.id=t.artist_id "
+            "WHERE pt.playlist_id=? ORDER BY pt.position", (playlist_id,))]
+        return self._write_playlist_file(file_url, row["name"] if row else "Playlist", tracks)
+
+    @Slot(int, "QVariant", result=bool)
+    def exportSmartPlaylist(self, smart_id, file_url):
+        name = next((p["name"] for p in db.smart_playlists(self.con) if p["id"] == smart_id),
+                    "Smart playlist")
+        return self._write_playlist_file(file_url, name,
+                                         db.smart_playlist_tracks(self.con, smart_id))
+
+    @Slot("QVariant", result=bool)
+    def exportQueue(self, file_url):
+        return self._write_playlist_file(file_url, "Queue", list(self.player.queue))
+
+    @Property(str, constant=True)
+    def exportFolder(self):
+        """Where the playlist file dialogs start: the Music folder, or home."""
+        music = os.path.expanduser("~/Music")
+        return QUrl.fromLocalFile(music if os.path.isdir(music) else os.path.expanduser("~")).toString()
+
+    # --- smart playlists you define ---
+
+    @Property("QVariantList", constant=True)
+    def smartFields(self):
+        return SMART_FIELDS
+
+    @Property("QVariantMap", constant=True)
+    def smartOps(self):
+        return SMART_OPS
+
+    @Property("QVariantList", constant=True)
+    def smartSorts(self):
+        return SMART_SORTS
+
+    @Slot(result="QVariantList")
+    def smartPlaylists(self):
+        return [{"id": p["id"], "name": p["name"]} for p in db.smart_playlists(self.con)]
+
+    @Slot(int, result="QVariantMap")
+    def smartPlaylistDefinition(self, smart_id):
+        for p in db.smart_playlists(self.con):
+            if p["id"] == smart_id:
+                return {"name": p["name"], **p["definition"]}
+        return {"name": "", "match": "all", "rules": [], "sort": "artist"}
+
+    @Slot(int, str, "QVariantMap", result=int)
+    def saveSmartPlaylist(self, smart_id, name, definition):
+        name = (name or "").strip() or "Smart playlist"
+        definition = dict(definition or {})
+        if smart_id >= 0:
+            db.update_smart_playlist(self.con, smart_id, name, definition)
+        else:
+            smart_id = db.create_smart_playlist(self.con, name, definition)
+        self.playlistsChanged.emit()
+        self.songsChanged.emit()
+        return smart_id
+
+    @Slot(int)
+    def deleteSmartPlaylist(self, smart_id):
+        db.delete_smart_playlist(self.con, smart_id)
+        self.playlistsChanged.emit()
+
+    @Slot(int, result="QVariantList")
+    def smartPlaylistSongs(self, smart_id):
+        return self._rows_to_songtable(db.smart_playlist_tracks(self.con, smart_id))
+
+    @Slot("QVariantMap", result=int)
+    def smartPreviewCount(self, definition):
+        """How many songs a definition matches, for the editor."""
+        where, params, _order, limit = smart_mod.build_query(dict(definition or {}))
+        row = self.con.execute(
+            "SELECT COUNT(*) FROM tracks t JOIN albums al ON al.id=t.album_id "
+            "JOIN artists ar ON ar.id=t.artist_id "
+            f"WHERE t.missing=0 AND ({where})", params).fetchone()
+        return min(row[0], limit)
+
+    # --- opening files from outside (the command line, a file manager) ---
+
+    def _files_to_open(self, paths):
+        files = []
+        for p in paths:
+            p = _local_file(p)
+            if os.path.isdir(p):
+                for root, dirs, names in os.walk(p):
+                    dirs.sort(key=natural_key)
+                    files += [os.path.join(root, n)
+                              for n in sorted((n for n in names if is_audio(n)), key=natural_key)]
+            elif playlist_files.format_for(p) and os.path.isfile(p):
+                try:
+                    files += [e["path"] for e in playlist_files.read_playlist(p)]
+                except Exception as e:
+                    self._set_notice(f"Couldn't read {os.path.basename(p)}: {e}")
+            elif is_audio(p) and os.path.isfile(p):
+                files.append(os.path.abspath(p))
+        return files
+
+    def _track_dicts_for_any(self, files):
+        """Track dicts for files, from the library where it has them and from
+        the files' own tags where it doesn't."""
+        known = {t["path"]: t for t in self._track_dicts_for_paths(files)}
+        tracks = []
+        for f in files:
+            if f in known:
+                tracks.append(known[f])
+                continue
+            if not os.path.isfile(f):
+                continue
+            tags = {}
+            reader = getattr(self.player.backend, "get_song_metadata", None)
+            if reader:
+                try:
+                    tags = reader(f) or {}
+                except Exception:
+                    tags = {}
+            tracks.append({"title": tags.get("title") or os.path.splitext(os.path.basename(f))[0],
+                           "track_no": 0, "path": f, "duration": 0.0,
+                           "artist": tags.get("artist") or "", "album_path": os.path.dirname(f),
+                           "album_id": -1, "artist_id": -1,
+                           "album_name": tags.get("album") or ""})
+        return tracks
+
+    @Slot("QVariantList")
+    def openPaths(self, paths):
+        """Play files, folders or playlist files handed to lp-deck."""
+        tracks = self._track_dicts_for_any(self._files_to_open(list(paths)))
+        if not tracks:
+            if paths:
+                self._set_notice("Nothing playable in what was opened.")
+            return
+        self._np_playlist_id = -1
+        self.player.set_queue(tracks, start=0, album_path=None)
+        self.queue.reload()
+        self.queueChanged.emit()
+
+    # --- playback: fade on pause, audio device ---
+
+    def _apply_fade(self):
+        if hasattr(self.player.backend, "fade_ms"):
+            self.player.backend.fade_ms = FADE_ON_PAUSE_MS if self._fade_on_pause else 0
+
+    @Property(bool, notify=transportChanged)
+    def fadeOnPause(self):
+        return self._fade_on_pause
+
+    @Slot(bool)
+    def setFadeOnPause(self, on):
+        self._fade_on_pause = bool(on)
+        self._settings.setValue("fadeOnPause", "true" if on else "false")
+        self._apply_fade()
+        self.transportChanged.emit()
+
+    @Slot(result="QVariantList")
+    def outputDevices(self):
+        """[{id, name}] with the system default first."""
+        devices = [{"id": "", "name": "System default"}]
+        lister = getattr(self.player.backend, "output_devices", None)
+        if lister:
+            devices += [{"id": d, "name": name or d} for d, name in lister() if d]
+        return devices
+
+    @Property(str, notify=transportChanged)
+    def outputDevice(self):
+        return self._output_device
+
+    @Slot(str)
+    def setOutputDevice(self, device_id):
+        self._output_device = device_id or ""
+        self._settings.setValue("outputDevice", self._output_device)
+        if hasattr(self.player.backend, "set_output_device"):
+            self.player.backend.set_output_device(self._output_device or None)
+        self.transportChanged.emit()
+
+    # --- desktop: tray, notifications, keeping the computer awake ---
+
+    @Property(bool, notify=settingsChanged)
+    def trayAvailable(self):
+        return bool(self.desktop is not None and self.desktop.available)
+
+    @Property(bool, notify=settingsChanged)
+    def showTray(self):
+        return self._show_tray
+
+    @Slot(bool)
+    def setShowTray(self, on):
+        self._show_tray = bool(on)
+        self._settings.setValue("showTray", "true" if on else "false")
+        if self.desktop is not None:
+            self.desktop.set_visible(self._show_tray)
+        self.settingsChanged.emit()
+
+    @Property(bool, notify=settingsChanged)
+    def closeToTray(self):
+        """Closing the window keeps lp-deck playing in the tray."""
+        return self._close_to_tray and self._show_tray and self.trayAvailable
+
+    @Slot(bool)
+    def setCloseToTray(self, on):
+        self._close_to_tray = bool(on)
+        self._settings.setValue("closeToTray", "true" if on else "false")
+        self.settingsChanged.emit()
+
+    @Property(bool, notify=settingsChanged)
+    def notifyTrackChange(self):
+        return self._notify_tracks
+
+    @Slot(bool)
+    def setNotifyTrackChange(self, on):
+        self._notify_tracks = bool(on)
+        self._settings.setValue("notifyTrackChange", "true" if on else "false")
+        self.settingsChanged.emit()
+
+    @Property(bool, notify=settingsChanged)
+    def keepAwake(self):
+        return self._keep_awake
+
+    @Slot(bool)
+    def setKeepAwake(self, on):
+        self._keep_awake = bool(on)
+        self._settings.setValue("keepAwake", "true" if on else "false")
+        self.settingsChanged.emit()
+        self._update_awake()
+
+    def _update_awake(self):
+        """Keep the computer from sleeping while music is actually playing."""
+        if self.inhibitor is None:
+            return
+        playing = False
+        try:
+            playing = bool(self.player.backend.is_actively_playing())
+        except Exception:
+            pass
+        self.inhibitor.set_active(self._keep_awake and playing)
+
+    def _schedule_notification(self, track):
+        """Announce a new track once it has been playing a moment, so skipping
+        through tracks and a paused restored session don't raise a notification."""
+        path = track.get("path")
+        if not self._notify_tracks or self.desktop is None or path == self._notified_path:
+            return
+
+        def announce():
+            cur = self._current_track()
+            if not cur or cur.get("path") != path or path == self._notified_path:
+                return
+            if not self.player.backend.is_actively_playing():
+                return
+            if QGuiApplication.focusWindow() is not None:     # the window is in front
+                return
+            self._notified_path = path
+            sub = " \u00b7 ".join(x for x in (cur.get("artist"), cur.get("album_name")) if x)
+            self.desktop.notify(self._np_title or cur.get("title") or "", sub,
+                                self.player.backend.find_album_art(cur.get("album_path"))
+                                if cur.get("album_path") else None)
+
+        QTimer.singleShot(1500, announce)
 
     # --- equalizer ---
 
@@ -1321,6 +1748,9 @@ class Controller(QObject):
                     self._np_album_id, cur.get("album_path"))
                 self._record_play(cur.get("path"))
                 self._load_lyrics(cur.get("path"))
+                self._schedule_notification(cur)
+            if self.desktop is not None:
+                self.desktop.set_tooltip("\n".join(x for x in (self._np_title, self._np_sub) if x))
         else:
             self._np_title = ""
             self._np_sub = ""
@@ -1473,17 +1903,24 @@ def run(con, player, db_path, on_ready=None):
     """Build the QML app and run its event loop. `on_ready(controller)` is
     called once the window exists (used to kick off background indexing)."""
     QQuickStyle.setStyle("Basic")        # neutral base; lp-deck styles its own dark theme
-    app = QGuiApplication.instance() or QGuiApplication([])
+    app = QApplication.instance() or QApplication([])   # widgets: the tray menu
     app.setOrganizationName("lp-deck")   # QSettings path
     app.setApplicationName("lp-deck")
+    app.setDesktopFileName("lp-deck")
+    # The window decides on close: quit, or stay in the tray (Main.qml onClosing).
+    app.setQuitOnLastWindowClosed(False)
     qmlRegisterType(VinylItem, "Lpdeck", 1, 0, "VinylItem")
 
     artists = ArtistsModel(con)
     queue = QueueModel(player)
     controller = Controller(con, player, artists, queue)
     controller.db_path = db_path
+    from .desktop import Tray
+    from .inhibit import SleepInhibitor
+    controller.attach_desktop(Tray(controller), SleepInhibitor())
 
     engine = QQmlApplicationEngine()
+    engine.quit.connect(app.quit)
     engine.addImageProvider("tiles", TileProvider(db_path))
     engine.addImageProvider("vinyl", VinylPreviewProvider(db_path))
     ctx = engine.rootContext()
@@ -1496,4 +1933,8 @@ def run(con, player, db_path, on_ready=None):
 
     if on_ready:
         on_ready(controller)
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        controller.inhibitor.shutdown()
+        controller.desktop.set_visible(False)

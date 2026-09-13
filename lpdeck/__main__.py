@@ -1,7 +1,8 @@
-"""Entry point: python -m lpdeck
+"""Entry point: python -m lpdeck [files, folders or playlists to play]
 
 Wires SQLite + lpcore + the Qt window. Config (music path, lastfm) is read from
-the same config.yml the kiosk uses, by default.
+the same config.yml the kiosk uses, by default. Only one lp-deck runs at a time:
+launching it again hands anything given on the command line to the running one.
 """
 import json
 import os
@@ -46,8 +47,24 @@ def _load_config():
     return {}
 
 
-def main():
+def main(argv=None):
+    from PySide6.QtWidgets import QApplication
     from . import qmlapp
+    from .single_instance import InstanceServer, send_to_running
+
+    args = sys.argv[1:] if argv is None else list(argv)
+    to_open = [os.path.abspath(a) for a in args if not a.startswith("-")]
+
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+    app.setOrganizationName("lp-deck")
+    app.setApplicationName("lp-deck")
+    if send_to_running(to_open):
+        print("lp-deck is already running; handed over to it")
+        return
+    instance = InstanceServer()
+    if not instance.listen():
+        print("lp-deck: couldn't listen for later launches; files opened from "
+              "elsewhere will start a second window")
 
     config = _load_config()
     music_path = config.get("music_library_path", "/mnt/share/media/Music")
@@ -86,10 +103,19 @@ def main():
         if mpris_handle:
             # repeat, shuffle and raise requests from the desktop update the window too
             mpris_handle.set_controls(controller.externalCommand.emit)
+        if to_open:
+            controller.openPaths(to_open)
+
+        def opened_elsewhere(paths):
+            if paths:
+                controller.openPaths(paths)
+            controller.raiseRequested.emit()
+        instance.opened.connect(opened_elsewhere)
 
     try:
         sys.exit(qmlapp.run(con, player, db_path, on_ready=on_ready))
     finally:
+        instance.close()
         player.save_state(STATE_PATH)
         if mpris_handle:
             mpris_handle.stop()

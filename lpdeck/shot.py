@@ -71,6 +71,9 @@ class _FakeBackend:
     def set_crossfade(self, ms): self._xf = ms
     def set_equalizer(self, enabled, preamp=0.0, bands=None): pass
     def eq_bands(self): return [31.25, 62.5, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+    fade_ms = 0
+    def output_devices(self): return [("speakers", "Built-in speakers"), ("hdmi", "HDMI")]
+    def set_output_device(self, device_id): self._device = device_id
 
 
 class _FakePlayer:

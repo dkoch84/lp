@@ -54,6 +54,7 @@ ApplicationWindow {
                              || rowActions.opened || metadataPopup.opened
                              || addToPlaylist.opened || newPlaylistPopup.opened
                              || playlistActions.opened || renamePopup.opened
+                             || smartActions.opened || smartEditor.opened
     // alias to the context `controller`. VinylItem has its own `controller`
     // property, so binding it to the bare name `controller` self-references
     // (null); bind to `win.appController` instead.
@@ -63,6 +64,16 @@ ApplicationWindow {
     readonly property bool typing: activeFocusItem !== null
                                    && activeFocusItem.hasOwnProperty("cursorPosition")
     readonly property bool keysFree: !typing && !popupOpen
+    // Closing the window quits, unless lp-deck is set to keep playing in the tray.
+    onClosing: (close) => {
+        if (controller && controller.closeToTray) {
+            close.accepted = false
+            win.hide()
+        } else {
+            Qt.quit()
+        }
+    }
+    Shortcut { sequence: "Ctrl+Q"; onActivated: Qt.quit() }
     Shortcut { sequence: "Space"; enabled: win.keysFree; onActivated: controller.playPause() }
     Shortcut { sequence: "Ctrl+Right"; enabled: win.keysFree; onActivated: controller.next() }
     Shortcut { sequence: "Ctrl+Left"; enabled: win.keysFree; onActivated: controller.previous() }
@@ -120,7 +131,19 @@ ApplicationWindow {
         s = Math.max(0, Math.round(s))
         return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2)
     }
+    // what an icon-only button does, for screen readers and tooltips
+    function glyphName(g) {
+        return ({ "‹": "Back", "✕": "Close", "⏭": "Next", "⏮": "Previous", "▶": "Play",
+                  "⏸": "Pause", "🔀": "Shuffle", "🔁": "Repeat", "🔂": "Repeat one",
+                  "♥": "Remove from favourites", "♡": "Add to favourites",
+                  "🔇": "Unmute", "🔊": "Mute", "◉": "Vinyl", "☰": "Queue",
+                  "♫": "Lyrics", "⚙": "Settings", "⛶": "Full view", "⋯": "More" })[g] || g
+    }
     function gotoArtists() { section = "artists"; stack.replace(null, artistsPage) }
+    function gotoAlbums() { section = "albums"; stack.replace(null, albumsPage, { "artistId": -1 }) }
+    function openSmartPlaylist(id, name) {
+        stack.push(songsPage, { "smartId": id, "headerTitle": name })
+    }
     function gotoPlaylists() { section = "playlists"; stack.replace(null, playlistsPage) }
     function openArtist(id, name) {
         stack.push(albumsPage, { "artistId": id, "artistName": name })
@@ -224,6 +247,10 @@ ApplicationWindow {
                             }
                             NavItem { label: "Artists"; active: win.section === "artists"
                                       onClicked: win.gotoArtists() }
+                            NavItem { label: "Albums"; active: win.section === "albums"
+                                      onClicked: win.gotoAlbums() }
+                            NavItem { label: "Tracks"; active: win.section === "all"
+                                      onClicked: win.openSmart("all", "All tracks") }
                             NavItem { label: "Genres"; active: win.section === "genres"
                                       onClicked: win.openGenres() }
                             NavItem { label: "Playlists"; active: win.section === "playlists"
@@ -527,6 +554,13 @@ ApplicationWindow {
         implicitHeight: 38
         radius: 8
         color: active ? theme.surface : (hh.hovered ? theme.surfaceHover : "transparent")
+        border.width: activeFocus ? 2 : 0; border.color: theme.accent
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: label
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
         Label {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left; anchors.leftMargin: 12
@@ -539,7 +573,8 @@ ApplicationWindow {
     }
 
     component SearchField: TextField {
-        placeholderText: "Search artists…"
+        placeholderText: "Search songs, albums, artists…"
+        Accessible.name: "Search"
         color: theme.text
         placeholderTextColor: theme.textDim
         selectionColor: theme.accent
@@ -556,8 +591,13 @@ ApplicationWindow {
     component ArtCard: Item {
         property url source
         property int edge: 150
+        property string accessibleName
+        property bool highlighted: false     // the keyboard's current item in a grid
         signal activated()
         signal rightClicked()
+        Accessible.role: Accessible.Button
+        Accessible.name: accessibleName
+        Accessible.onPressAction: activated()
         implicitWidth: edge; implicitHeight: edge
         Rectangle {
             id: cardRect
@@ -578,7 +618,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 radius: theme.radius
                 color: "transparent"
-                border.width: ch.hovered ? 2 : 0
+                border.width: (ch.hovered || parent.parent.highlighted) ? 2 : 0
                 border.color: theme.accent
             }
             layer.enabled: true
@@ -616,8 +656,19 @@ ApplicationWindow {
         property bool accent: false
         property bool flat: false        // Elisa-style: transparent, icon-only
         property int size: 38
+        property string tip: ""          // what it does; defaults to a name for the glyph
         signal clicked()
         implicitWidth: size; implicitHeight: size
+        activeFocusOnTab: true
+        border.width: activeFocus ? 2 : 0; border.color: theme.accent
+        Accessible.role: Accessible.Button
+        Accessible.name: tip !== "" ? tip : win.glyphName(glyph)
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
+        ToolTip.visible: ib.hovered
+        ToolTip.delay: 700
+        ToolTip.text: tip !== "" ? tip : win.glyphName(glyph)
         radius: width / 2
         color: flat ? (ib.hovered ? theme.surfaceHover : "transparent")
                     : (accent ? theme.accent
@@ -653,6 +704,15 @@ ApplicationWindow {
                     color: modelData.value === current ? theme.accentText : theme.text
                     font.pixelSize: 13
                 }
+                activeFocusOnTab: true
+                border.width: activeFocus ? 2 : 0; border.color: theme.text
+                Accessible.role: Accessible.RadioButton
+                Accessible.name: modelData.label
+                Accessible.checkable: true
+                Accessible.checked: modelData.value === current
+                Accessible.onPressAction: picked(modelData.value)
+                Keys.onReturnPressed: picked(modelData.value)
+                Keys.onEnterPressed: picked(modelData.value)
                 HoverHandler { id: segH }
                 TapHandler { onTapped: picked(modelData.value) }
             }
@@ -688,6 +748,13 @@ ApplicationWindow {
         implicitHeight: 44
         radius: 8
         color: srh.hovered ? theme.surfaceHover : "transparent"
+        border.width: activeFocus ? 2 : 0; border.color: theme.accent
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: label
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
         Label {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left; anchors.leftMargin: 12
@@ -726,11 +793,19 @@ ApplicationWindow {
         property int diameter: 72
         signal clicked()
         spacing: 5
+        activeFocusOnTab: true
+        Accessible.role: Accessible.RadioButton
+        Accessible.name: caption
+        Accessible.checkable: true
+        Accessible.checked: selected
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
         Rectangle {
             width: diameter; height: diameter; radius: diameter / 2
             anchors.horizontalCenter: parent.horizontalCenter
             color: "transparent"
-            border.width: selected ? 3 : 0; border.color: theme.accent
+            border.width: (selected || parent.activeFocus) ? 3 : 0; border.color: theme.accent
             Image {
                 anchors.fill: parent; anchors.margins: 3
                 source: parent.parent.source
@@ -772,10 +847,111 @@ ApplicationWindow {
         implicitWidth: pillLbl.implicitWidth + 22
         radius: 15
         color: selected ? theme.accent : (pillH.hovered ? theme.line : theme.surfaceHover)
+        border.width: activeFocus ? 2 : 0; border.color: theme.text
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: label
+        Accessible.checkable: selected
+        Accessible.checked: selected
+        Accessible.onPressAction: clicked()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
         Label { id: pillLbl; anchors.centerIn: parent; text: parent.label
                 color: parent.selected ? theme.accentText : theme.text; font.pixelSize: 12 }
         HoverHandler { id: pillH }
         TapHandler { onTapped: parent.clicked() }
+    }
+
+    // an on/off row for settings
+    component SettingToggle: Rectangle {
+        id: tg
+        property string label
+        property string detail: ""
+        property bool checked: false
+        signal toggled(bool on)
+        Layout.fillWidth: true
+        implicitHeight: tgCol.implicitHeight + 14
+        radius: 8
+        color: tgH.hovered ? theme.surfaceHover : "transparent"
+        border.width: activeFocus ? 2 : 0; border.color: theme.accent
+        opacity: enabled ? 1 : 0.5
+        activeFocusOnTab: true
+        Accessible.role: Accessible.CheckBox
+        Accessible.name: label
+        Accessible.description: detail
+        Accessible.checkable: true
+        Accessible.checked: checked
+        Accessible.onToggleAction: toggled(!checked)
+        Accessible.onPressAction: toggled(!checked)
+        Keys.onReturnPressed: toggled(!checked)
+        Keys.onEnterPressed: toggled(!checked)
+        RowLayout {
+            anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
+            spacing: 10
+            ColumnLayout {
+                id: tgCol
+                Layout.fillWidth: true; spacing: 1
+                Label { text: tg.label; color: theme.text; font.pixelSize: 13
+                        wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                Label { visible: tg.detail !== ""; text: tg.detail; color: theme.textDim
+                        font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            }
+            Rectangle {
+                implicitWidth: 38; implicitHeight: 22; radius: 11
+                color: tg.checked ? theme.accent : theme.line
+                Rectangle {
+                    width: 16; height: 16; radius: 8; y: 3
+                    x: tg.checked ? parent.width - width - 3 : 3
+                    color: tg.checked ? theme.accentText : theme.textDim
+                    Behavior on x { NumberAnimation { duration: 120 } }
+                }
+            }
+        }
+        HoverHandler { id: tgH }
+        TapHandler { onTapped: tg.toggled(!tg.checked) }
+    }
+
+    // a dark-themed drop-down
+    component ThemeCombo: ComboBox {
+        id: cbx
+        implicitHeight: 34
+        font.pixelSize: 13
+        background: Rectangle {
+            radius: 8
+            color: cbx.hovered ? theme.line : theme.surfaceHover
+            border.width: cbx.activeFocus ? 1 : 0; border.color: theme.accent
+        }
+        contentItem: Label {
+            leftPadding: 10; rightPadding: 22
+            text: cbx.displayText; color: theme.text; font: cbx.font
+            verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+        }
+        indicator: Label {
+            x: cbx.width - width - 10; anchors.verticalCenter: parent.verticalCenter
+            text: "▾"; color: theme.textDim
+        }
+        delegate: ItemDelegate {
+            required property var modelData
+            required property int index
+            width: cbx.width
+            highlighted: cbx.highlightedIndex === index
+            contentItem: Label { text: modelData[cbx.textRole]; color: theme.text
+                                 font: cbx.font; elide: Text.ElideRight }
+            background: Rectangle { color: highlighted ? theme.surfaceHover : theme.surface }
+        }
+        popup: Popup {
+            y: cbx.height + 2; width: cbx.width; padding: 4
+            implicitHeight: Math.min(contentItem.implicitHeight + 8, 320)
+            contentItem: ListView {
+                clip: true
+                implicitHeight: contentHeight
+                model: cbx.popup.visible ? cbx.delegateModel : null
+                currentIndex: cbx.highlightedIndex
+                ScrollBar.vertical: ScrollBar { }
+            }
+            background: Rectangle { color: theme.surface; radius: 8
+                                    border.width: 1; border.color: theme.line }
+        }
     }
 
     // ============================ pages ============================
@@ -803,10 +979,17 @@ ApplicationWindow {
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar { }
                 WheelScroller { view: grid }
+                // keyboard: Tab into the grid, arrows move, Return opens
+                activeFocusOnTab: true
+                currentIndex: -1
+                onActiveFocusChanged: if (activeFocus && currentIndex < 0 && count > 0) currentIndex = 0
+                Keys.onReturnPressed: if (currentItem) win.openArtist(currentItem.artistId, currentItem.name)
+                Keys.onEnterPressed: if (currentItem) win.openArtist(currentItem.artistId, currentItem.name)
                 delegate: Item {
                     width: grid.cellWidth; height: grid.cellHeight
                     required property string name
                     required property int artistId
+                    required property int index
                     ColumnLayout {
                         anchors.centerIn: parent
                         spacing: 10
@@ -814,6 +997,8 @@ ApplicationWindow {
                             Layout.alignment: Qt.AlignHCenter
                             edge: grid.tile
                             source: "image://tiles/artist/" + artistId
+                            accessibleName: name
+                            highlighted: grid.activeFocus && grid.currentIndex === index
                             onActivated: win.openArtist(artistId, name)
                             onRightClicked: win.addArtistToPlaylist(artistId)
                         }
@@ -837,14 +1022,17 @@ ApplicationWindow {
     Component {
         id: albumsPage
         ColumnLayout {
-            property int artistId
+            id: albPg
+            property int artistId: -1          // -1: every album in the library
             property string artistName
             // comma-expr makes the binding depend on albumSort → re-queries on change
             property var albumsData: (controller.albumSort,
-                                      controller.artistAlbums(artistId))
+                                      artistId >= 0 ? controller.artistAlbums(artistId)
+                                                    : controller.allAlbums())
             spacing: 0
             PageHeader {
-                title: artistName; showBack: true; onBack: stack.pop()
+                title: albPg.artistId >= 0 ? artistName : "Albums"
+                showBack: stack.depth > 1; onBack: stack.pop()
             }
             GridView {
                 id: agrid
@@ -861,9 +1049,20 @@ ApplicationWindow {
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar { }
                 WheelScroller { view: agrid }
+                activeFocusOnTab: true
+                currentIndex: -1
+                onActiveFocusChanged: if (activeFocus && currentIndex < 0 && count > 0) currentIndex = 0
+                function openCurrent() {
+                    if (!currentItem) return
+                    var m = currentItem.modelData
+                    win.openAlbum(m.id, m.name, m.year, m.coverUrl)
+                }
+                Keys.onReturnPressed: openCurrent()
+                Keys.onEnterPressed: openCurrent()
                 delegate: Item {
                     width: agrid.cellWidth; height: agrid.cellHeight
                     required property var modelData
+                    required property int index
                     ColumnLayout {
                         anchors.centerIn: parent
                         spacing: 10
@@ -871,6 +1070,8 @@ ApplicationWindow {
                             Layout.alignment: Qt.AlignHCenter
                             edge: agrid.tile
                             source: modelData.coverUrl
+                            accessibleName: modelData.name
+                            highlighted: agrid.activeFocus && agrid.currentIndex === index
                             onActivated: win.openAlbum(modelData.id, modelData.name,
                                                        modelData.year, modelData.coverUrl)
                             onRightClicked: win.addAlbumToPlaylist(modelData.path)
@@ -885,7 +1086,9 @@ ApplicationWindow {
                                 font.weight: Font.DemiBold
                             }
                             Label {
-                                text: modelData.year || ""
+                                text: albPg.artistId >= 0 ? (modelData.year || "")
+                                      : [modelData.artist, modelData.year].filter(Boolean).join("  ·  ")
+                                Layout.fillWidth: true; elide: Text.ElideRight
                                 color: theme.textDim; font.pixelSize: 11
                             }
                         }
@@ -904,13 +1107,15 @@ ApplicationWindow {
             property int playlistId: -1
             property string smartKind: ""      // favorites | recent | most | added
             property string genreName: ""
+            property int smartId: -1           // a smart playlist you defined
             property string headerTitle
             property string albumYear
             property url coverUrl
             property bool isAlbum: albumId >= 0
-            property bool isSmart: smartKind.length > 0 || genreName.length > 0
+            property bool isSmart: smartKind.length > 0 || genreName.length > 0 || smartId >= 0
             function querySongs() {
                 if (isAlbum) return controller.albumSongs(albumId)
+                if (smartId >= 0) return controller.smartPlaylistSongs(smartId)
                 if (genreName.length > 0) return controller.genreSongs(genreName)
                 if (smartKind.length > 0) return controller.smartList(smartKind)
                 return controller.playlistSongs(playlistId)
@@ -1061,24 +1266,41 @@ ApplicationWindow {
                 ScrollBar.vertical: ScrollBar { }
                 WheelScroller { view: songList }
                 property int rowH: 46
+                // keyboard: Tab into the list, arrows move, Return plays, Menu for actions
+                activeFocusOnTab: true
+                currentIndex: -1
+                onActiveFocusChanged: if (activeFocus && currentIndex < 0 && count > 0) currentIndex = 0
+                Keys.onReturnPressed: if (currentIndex >= 0) songPg.play(songs[currentIndex].index)
+                Keys.onEnterPressed: if (currentIndex >= 0) songPg.play(songs[currentIndex].index)
+                Keys.onMenuPressed: {
+                    if (currentIndex < 0) return
+                    var s = songs[currentIndex]
+                    win.trackActions(s.path, s.title, songPg.isAlbum ? -1 : songPg.playlistId, s.index)
+                }
                 delegate: Item {
                     id: rowItem
                     required property var modelData
                     width: songList.width
                     height: songList.rowH
                     z: drag.active ? 2 : 1
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: modelData.title + ", " + modelData.artist
+                                     + (modelData.available === false ? ", missing" : "")
                     Rectangle {
                         id: rowRect
                         width: songList.width - 2 * theme.pad
                         x: theme.pad
                         height: songList.rowH - 2
                         radius: 7
+                        // a playlist entry whose file is gone stays, dimmed
+                        opacity: rowItem.modelData.available === false ? 0.45 : 1.0
                         // dragging detaches the row vertically; otherwise it sits flush
                         y: drag.active ? (rowItem.height - height) / 2 + drag.translation.y : (rowItem.height - height) / 2
                         color: songPg.isSel(rowItem.modelData.path)
                                ? Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.18)
                                : (drag.active ? theme.surfaceHover
-                                              : (rh.hovered ? theme.surfaceHover : "transparent"))
+                                              : ((rh.hovered || (songList.activeFocus && rowItem.ListView.isCurrentItem))
+                                                 ? theme.surfaceHover : "transparent"))
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 8; anchors.rightMargin: 8
@@ -1175,7 +1397,8 @@ ApplicationWindow {
         ColumnLayout {
             id: plPage
             property var lists: controller.playlists()
-            function reload() { lists = controller.playlists() }
+            property var smartLists: controller.smartPlaylists()
+            function reload() { lists = controller.playlists(); smartLists = controller.smartPlaylists() }
             Connections { target: controller
                           function onPlaylistsChanged() { plPage.reload() } }
             spacing: 0
@@ -1186,9 +1409,15 @@ ApplicationWindow {
                 Label { text: "Playlists"; color: theme.text
                         font.pixelSize: 24; font.weight: Font.Bold }
                 Item { Layout.fillWidth: true }
+                Pill { label: "Import…"; implicitHeight: 36; onClicked: importDialog.open() }
+                Pill { label: "＋  Smart playlist"; implicitHeight: 36
+                       onClicked: smartEditor.openFor(-1) }
                 Rectangle {
                     implicitWidth: 150; implicitHeight: 36; radius: 18
                     color: npb.hovered ? Qt.lighter(theme.accent, 1.1) : theme.accent
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "New playlist"
+                    Accessible.onPressAction: newPlaylistPopup.open()
                     Label { anchors.centerIn: parent; text: "＋  New playlist"
                             color: theme.accentText; font.pixelSize: 13
                             font.weight: Font.DemiBold }
@@ -1197,12 +1426,58 @@ ApplicationWindow {
                 }
             }
             Label {
-                visible: lists.length === 0
+                visible: plPage.smartLists.length > 0
+                text: "SMART PLAYLISTS"; color: theme.textDim
+                font.pixelSize: 11; font.weight: Font.Bold
+                Layout.leftMargin: theme.pad + 12; Layout.topMargin: 4
+            }
+            Repeater {
+                model: plPage.smartLists
+                delegate: Rectangle {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Layout.leftMargin: theme.pad; Layout.rightMargin: theme.pad
+                    implicitHeight: 46; radius: 7
+                    color: (sph.hovered || activeFocus) ? theme.surfaceHover : "transparent"
+                    activeFocusOnTab: true
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Smart playlist " + modelData.name
+                    Accessible.onPressAction: win.openSmartPlaylist(modelData.id, modelData.name)
+                    Keys.onReturnPressed: win.openSmartPlaylist(modelData.id, modelData.name)
+                    Keys.onMenuPressed: smartActions.openFor(modelData.id, modelData.name)
+                    RowLayout {
+                        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                        spacing: 12
+                        Label { text: "✦"; color: theme.accent; font.pixelSize: 15
+                                Layout.preferredWidth: 20 }
+                        Label { text: modelData.name; color: theme.text; font.pixelSize: 15
+                                Layout.fillWidth: true; elide: Text.ElideRight }
+                        Label { text: "right-click to edit"; color: theme.textDim
+                                font.pixelSize: 11; visible: sph.hovered }
+                    }
+                    HoverHandler { id: sph }
+                    TapHandler { onTapped: win.openSmartPlaylist(modelData.id, modelData.name) }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: smartActions.openFor(modelData.id, modelData.name)
+                    }
+                }
+            }
+            Label {
+                visible: plPage.smartLists.length > 0 && plPage.lists.length > 0
+                text: "PLAYLISTS"; color: theme.textDim
+                font.pixelSize: 11; font.weight: Font.Bold
+                Layout.leftMargin: theme.pad + 12; Layout.topMargin: 10
+            }
+            Label {
+                visible: lists.length === 0 && plPage.smartLists.length === 0
                 Layout.fillWidth: true; Layout.topMargin: 40
                 text: "No playlists yet. Create one, then add songs from the ⋯ menu."
                 color: theme.textDim; font.pixelSize: 15
                 horizontalAlignment: Text.AlignHCenter
             }
+            // takes the spare height when there's no playlist list to fill it
+            Item { Layout.fillHeight: true; visible: !plList.visible }
             ListView {
                 id: plList
                 visible: lists.length > 0
@@ -1395,6 +1670,22 @@ ApplicationWindow {
                             onTapped: controller.playAlbum(modelData.albumId, modelData.index)
                         }
                     }
+                }
+                Label {
+                    visible: win.query.length > 0 && sv.results.artists.length === 0
+                             && sv.results.albums.length === 0 && sv.results.songs.length === 0
+                    Layout.fillWidth: true; Layout.topMargin: 40
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "Nothing matches \u201c" + win.query + "\u201d."
+                    color: theme.text; font.pixelSize: 15
+                }
+                Label {
+                    Layout.fillWidth: true; Layout.topMargin: 18
+                    Layout.leftMargin: theme.pad; Layout.rightMargin: theme.pad
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                    text: "Narrow a search with artist:, album:, title:, genre: or year:, "
+                          + "for example  artist:pallbearer year:2010-2019  or  album:\"forgotten days\""
+                    color: theme.textDim; font.pixelSize: 12
                 }
                 Item { Layout.preferredHeight: 16 }
             }
@@ -1610,6 +1901,7 @@ ApplicationWindow {
                 Pill { label: "Stop after this"; visible: controller.queueCount > 0
                        selected: controller.stopAfterCurrent
                        onClicked: controller.toggleStopAfterCurrent() }
+                Pill { label: "Save…"; onClicked: exportDialog.openFor("queue", -1, "Queue") }
                 Pill { label: "Clear"; visible: controller.queueCount > 0
                        onClicked: controller.clearQueue() }
             }
@@ -1880,6 +2172,28 @@ ApplicationWindow {
                         Layout.preferredWidth: 36 }
             }
 
+            SettingToggle { label: "Fade out when pausing"; checked: controller.fadeOnPause
+                            onToggled: (on) => controller.setFadeOnPause(on) }
+
+            // ---- Audio output ----
+            Label { text: "Audio output"; color: theme.textDim
+                    font.pixelSize: 12; Layout.topMargin: 6 }
+            Flow {
+                id: deviceFlow
+                Layout.fillWidth: true
+                spacing: 8
+                property var devices: settingsPopup.opened ? controller.outputDevices() : []
+                Repeater {
+                    model: deviceFlow.devices
+                    delegate: Pill {
+                        required property var modelData
+                        label: modelData.name
+                        selected: modelData.id === controller.outputDevice
+                        onClicked: controller.setOutputDevice(modelData.id)
+                    }
+                }
+            }
+
             // ---- ReplayGain ----
             Label { text: "Volume normalisation (ReplayGain)"; color: theme.textDim
                     font.pixelSize: 12; Layout.topMargin: 6 }
@@ -1894,6 +2208,24 @@ ApplicationWindow {
                     text: "Applies after restart."
                     color: theme.textDim; font.pixelSize: 10 }
 
+            // ---- Desktop ----
+            Label { text: "Desktop"; color: theme.textDim
+                    font.pixelSize: 12; Layout.topMargin: 10 }
+            SettingToggle { label: "Show in the system tray"; visible: controller.trayAvailable
+                            checked: controller.showTray
+                            onToggled: (on) => controller.setShowTray(on) }
+            SettingToggle { label: "Keep playing in the tray when the window is closed"
+                            visible: controller.trayAvailable; enabled: controller.showTray
+                            checked: controller.closeToTray
+                            onToggled: (on) => controller.setCloseToTray(on) }
+            SettingToggle { label: "Notify when the track changes"
+                            detail: "Only while lp-deck isn't the window in front."
+                            checked: controller.notifyTrackChange
+                            onToggled: (on) => controller.setNotifyTrackChange(on) }
+            SettingToggle { label: "Keep the computer awake while playing"
+                            checked: controller.keepAwake
+                            onToggled: (on) => controller.setKeepAwake(on) }
+
             // ---- Keyboard shortcuts ----
             Label { text: "Keyboard shortcuts"; color: theme.textDim
                     font.pixelSize: 12; Layout.topMargin: 10 }
@@ -1907,7 +2239,8 @@ ApplicationWindow {
                         ["Ctrl+R", "Repeat"],
                         ["Ctrl+.", "Stop after this track"],
                         ["Ctrl+F", "Search"],
-                        ["Esc", "Back"]]
+                        ["Esc", "Back"],
+                        ["Ctrl+Q", "Quit"]]
                 delegate: RowLayout {
                     required property var modelData
                     Layout.fillWidth: true
@@ -1993,9 +2326,256 @@ ApplicationWindow {
                        onClicked: { playlistActions.close()
                                     renamePopup.openFor(playlistActions.plId,
                                                         playlistActions.plName) } }
+            SheetRow { label: "Export to a file…"
+                       onClicked: { playlistActions.close()
+                                    exportDialog.openFor("playlist", playlistActions.plId,
+                                                         playlistActions.plName) } }
             SheetRow { label: "Delete playlist"
                        onClicked: { playlistActions.close()
                                     controller.deletePlaylist(playlistActions.plId) } }
+        }
+    }
+
+    // ---- playlist files ----
+    FileDialog {
+        id: importDialog
+        title: "Import a playlist"
+        fileMode: FileDialog.OpenFile
+        currentFolder: controller.exportFolder
+        nameFilters: ["Playlists (*.m3u *.m3u8 *.pls *.xspf)", "All files (*)"]
+        onAccepted: {
+            if (controller.importPlaylist(selectedFile) >= 0 && win.section !== "playlists")
+                win.gotoPlaylists()
+        }
+    }
+    FileDialog {
+        id: exportDialog
+        property string kind: "playlist"     // playlist | smart | queue
+        property int itemId: -1
+        function openFor(k, id, name) {
+            kind = k; itemId = id
+            var safe = (name || "Playlist").replace(/[\/\\:*?"<>|]/g, "_")
+            selectedFile = controller.exportFolder + "/" + encodeURIComponent(safe) + ".m3u8"
+            open()
+        }
+        title: "Export to a playlist file"
+        fileMode: FileDialog.SaveFile
+        currentFolder: controller.exportFolder
+        defaultSuffix: "m3u8"
+        nameFilters: ["M3U playlist (*.m3u8 *.m3u)", "XSPF playlist (*.xspf)",
+                      "PLS playlist (*.pls)"]
+        onAccepted: {
+            if (kind === "smart") controller.exportSmartPlaylist(itemId, selectedFile)
+            else if (kind === "queue") controller.exportQueue(selectedFile)
+            else controller.exportPlaylist(itemId, selectedFile)
+        }
+    }
+
+    // ---- smart playlist actions ----
+    Popup {
+        id: smartActions
+        objectName: "smartActions"
+        property int smartId: -1
+        property string smartName
+        function openFor(id, name) { smartId = id; smartName = name; open() }
+        modal: true; dim: true
+        width: 340; padding: 18
+        x: Math.round((win.width - width) / 2)
+        y: Math.round((win.height - height) / 2)
+        background: PopupBg { }
+        contentItem: ColumnLayout {
+            spacing: 6
+            Label { text: smartActions.smartName; color: theme.text
+                    font.pixelSize: 15; font.weight: Font.Bold
+                    elide: Text.ElideRight; Layout.fillWidth: true
+                    Layout.bottomMargin: 6 }
+            SheetRow { label: "Play"
+                       onClicked: {
+                           smartActions.close()
+                           var songs = controller.smartPlaylistSongs(smartActions.smartId)
+                           controller.playPaths(songs.map(function(s){ return s.path }), 0)
+                       } }
+            SheetRow { label: "Edit rules…"
+                       onClicked: { smartActions.close(); smartEditor.openFor(smartActions.smartId) } }
+            SheetRow { label: "Export to a file…"
+                       onClicked: { smartActions.close()
+                                    exportDialog.openFor("smart", smartActions.smartId,
+                                                         smartActions.smartName) } }
+            SheetRow { label: "Delete smart playlist"
+                       onClicked: { smartActions.close()
+                                    controller.deleteSmartPlaylist(smartActions.smartId) } }
+        }
+    }
+
+    // ---- smart playlist editor ----
+    Popup {
+        id: smartEditor
+        objectName: "smartEditor"
+        property int smartId: -1
+        property string match: "all"
+        property var rules: []
+        property string sort: "artist"
+        property string limitText: ""
+        // Typed values are written into `rules` in place (reassigning the array
+        // would rebuild the rows and drop focus mid-word); `revision` tells the
+        // song count to recount.
+        property int revision: 0
+        readonly property var definition: (revision, { "match": match, "rules": rules,
+                                                       "sort": sort,
+                                                       "limit": parseInt(limitText) || 0 })
+        readonly property int matches: opened ? controller.smartPreviewCount(definition) : 0
+        function openFor(id) {
+            var d = controller.smartPlaylistDefinition(id)
+            smartId = id
+            smartNameField.text = d.name || ""
+            match = d.match || "all"
+            rules = (d.rules && d.rules.length) ? d.rules : [newRule("genre")]
+            sort = d.sort || "artist"
+            limitText = d.limit ? String(d.limit) : ""
+            open()
+        }
+        function fieldType(f) {
+            var fs = controller.smartFields
+            for (var i = 0; i < fs.length; i++) if (fs[i].field === f) return fs[i].type
+            return "text"
+        }
+        function newRule(f) {
+            var t = fieldType(f)
+            return { "field": f, "op": controller.smartOps[t][0].op,
+                     "value": t === "number" ? 0 : (t === "date" ? 30 : "") }
+        }
+        function setRule(i, key, value) {
+            var r = rules.slice()
+            if (key === "field") r[i] = newRule(value)
+            else { r[i] = Object.assign({}, r[i]); r[i][key] = value }
+            rules = r
+        }
+        function removeRule(i) { var r = rules.slice(); r.splice(i, 1); rules = r }
+        function indexOfKey(list, key, value) {
+            for (var i = 0; i < list.length; i++) if (list[i][key] === value) return i
+            return 0
+        }
+        function save() {
+            var name = smartNameField.text
+            var id = controller.saveSmartPlaylist(smartId, name, definition)
+            var isNew = smartId < 0
+            close()
+            if (isNew) win.openSmartPlaylist(id, name.trim() || "Smart playlist")
+        }
+        modal: true; dim: true
+        width: Math.min(660, win.width - 40); padding: 20
+        x: Math.round((win.width - width) / 2)
+        y: Math.round((win.height - height) / 2)
+        background: PopupBg { }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label { text: smartEditor.smartId >= 0 ? "Edit smart playlist" : "New smart playlist"
+                    color: theme.text; font.pixelSize: 18; font.weight: Font.Bold }
+            Field { id: smartNameField; Layout.fillWidth: true; placeholderText: "Name"
+                    Accessible.name: "Smart playlist name" }
+            RowLayout {
+                spacing: 10
+                Label { text: "Songs matching"; color: theme.textDim; font.pixelSize: 13 }
+                Segmented {
+                    options: [{ label: "all rules", value: "all" }, { label: "any rule", value: "any" }]
+                    current: smartEditor.match
+                    onPicked: (value) => smartEditor.match = value
+                }
+            }
+            Repeater {
+                model: smartEditor.rules
+                delegate: RowLayout {
+                    id: ruleRow
+                    required property var modelData
+                    required property int index
+                    readonly property string type: smartEditor.fieldType(modelData.field)
+                    readonly property bool wantsValue: type !== "bool" && modelData.op !== "never"
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ThemeCombo {
+                        Layout.preferredWidth: 160
+                        model: controller.smartFields; textRole: "label"
+                        currentIndex: smartEditor.indexOfKey(controller.smartFields, "field",
+                                                             ruleRow.modelData.field)
+                        Accessible.name: "Field"
+                        onActivated: (i) => smartEditor.setRule(ruleRow.index, "field",
+                                                                controller.smartFields[i].field)
+                    }
+                    ThemeCombo {
+                        Layout.preferredWidth: 180
+                        model: controller.smartOps[ruleRow.type]; textRole: "label"
+                        currentIndex: smartEditor.indexOfKey(controller.smartOps[ruleRow.type], "op",
+                                                             ruleRow.modelData.op)
+                        Accessible.name: "Condition"
+                        onActivated: (i) => smartEditor.setRule(ruleRow.index, "op",
+                                                                controller.smartOps[ruleRow.type][i].op)
+                    }
+                    Field {
+                        Layout.fillWidth: true
+                        visible: ruleRow.wantsValue
+                        text: ruleRow.modelData.value === undefined || ruleRow.modelData.value === null
+                              ? "" : String(ruleRow.modelData.value)
+                        inputMethodHints: ruleRow.type === "text" ? Qt.ImhNone : Qt.ImhDigitsOnly
+                        Accessible.name: "Value"
+                        onTextEdited: {
+                            smartEditor.rules[ruleRow.index].value =
+                                ruleRow.type === "text" ? text : Number(text)
+                            smartEditor.revision++
+                        }
+                    }
+                    Item { Layout.fillWidth: true; visible: !ruleRow.wantsValue }
+                    IconButton { glyph: "✕"; flat: true; size: 30; tip: "Remove this rule"
+                                 onClicked: smartEditor.removeRule(ruleRow.index) }
+                }
+            }
+            Pill { label: "＋  Add rule"
+                   onClicked: smartEditor.rules = smartEditor.rules.concat([smartEditor.newRule("artist")]) }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Label { text: "Order"; color: theme.textDim; font.pixelSize: 13 }
+                ThemeCombo {
+                    Layout.preferredWidth: 180
+                    model: controller.smartSorts; textRole: "label"
+                    currentIndex: smartEditor.indexOfKey(controller.smartSorts, "value", smartEditor.sort)
+                    Accessible.name: "Order"
+                    onActivated: (i) => smartEditor.sort = controller.smartSorts[i].value
+                }
+                Label { text: "Limit"; color: theme.textDim; font.pixelSize: 13
+                        Layout.leftMargin: 8 }
+                Field {
+                    Layout.preferredWidth: 80
+                    placeholderText: "none"
+                    text: smartEditor.limitText
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    validator: IntValidator { bottom: 1; top: 10000 }
+                    Accessible.name: "Limit"
+                    onTextEdited: smartEditor.limitText = text
+                }
+                Item { Layout.fillWidth: true }
+                Label { text: smartEditor.matches === 1 ? "1 song" : smartEditor.matches + " songs"
+                        color: theme.textDim; font.pixelSize: 13 }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                SheetRow { label: "Cancel"; Layout.fillWidth: false; Layout.preferredWidth: 90
+                           onClicked: smartEditor.close() }
+                Rectangle {
+                    implicitWidth: 90; implicitHeight: 38; radius: 19
+                    color: smartSave.hovered ? Qt.lighter(theme.accent, 1.1) : theme.accent
+                    activeFocusOnTab: true
+                    border.width: activeFocus ? 2 : 0; border.color: theme.text
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Save"
+                    Accessible.onPressAction: smartEditor.save()
+                    Keys.onReturnPressed: smartEditor.save()
+                    Label { anchors.centerIn: parent; text: "Save"
+                            color: theme.accentText; font.weight: Font.DemiBold }
+                    HoverHandler { id: smartSave }
+                    TapHandler { onTapped: smartEditor.save() }
+                }
+            }
         }
     }
 
