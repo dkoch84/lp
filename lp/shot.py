@@ -11,10 +11,13 @@ album: the SDL2 renderer works fine under the dummy video driver, including
     python -m lp.shot out.png --title "A Very Long Song Title That Will Not Fit"
     python -m lp.shot out.png --track 7 --of 12 --size 1920x1080 --art cover.jpg
     python -m lp.shot out.png --style nebula-marble --label art
+    python -m lp.shot out.png --album-dir "/music/Artist/2025 - Album" --track 3
 
 The album art defaults to a generated placeholder, so the harness needs nothing
 from a real library. `--art` takes a real cover when you want to eyeball
-contrast against actual artwork.
+contrast against actual artwork. `--album-dir` takes a real album folder: its
+tags, track lengths and cover drive the shot, so the grooves and the needle sit
+where that album's tracks really are.
 """
 import argparse
 import os
@@ -59,6 +62,34 @@ def _placeholder_art(path, size=720):
     return path
 
 
+def _first_tag(tags, key):
+    values = tags.get(key) or ['']
+    return str(values[0])
+
+
+def _album_info(folder):
+    """([{title, artist, album, date, length}], cover path) for a real album folder."""
+    from mutagen import File as MutagenFile
+
+    from lpcore.covers import find_cover
+    from lpcore.tracks import album_track_paths
+
+    tracks = []
+    for path in album_track_paths(folder):
+        f = MutagenFile(path, easy=True)
+        tags = (f.tags or {}) if f is not None else {}
+        tracks.append({
+            'title': _first_tag(tags, 'title') or os.path.splitext(os.path.basename(path))[0],
+            'artist': _first_tag(tags, 'artist'),
+            'album': _first_tag(tags, 'album'),
+            'date': _first_tag(tags, 'date'),
+            'length': float(f.info.length) if f is not None else 0.0,
+        })
+    if not tracks:
+        raise SystemExit(f'no audio files in {folder}')
+    return tracks, find_cover(folder)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -71,7 +102,9 @@ def main(argv=None):
     ap.add_argument('--of', type=int, default=11, help='total tracks')
     ap.add_argument('--size', default='1920x1080', help='render resolution, WxH')
     ap.add_argument('--art', default=None, help='cover image (default: generated)')
-    ap.add_argument('--elapsed', type=float, default=0.42,
+    ap.add_argument('--album-dir', default=None,
+                    help="a real album folder: its tags, track lengths and cover")
+    ap.add_argument('--elapsed', type=float, default=None,
                     help='fraction of the album played, for needle position')
     ap.add_argument('--style', default=VinylSettings.style,
                     help='vinyl style id, as the web picker sends (e.g. nebula-marble)')
@@ -88,7 +121,27 @@ def main(argv=None):
     os.environ.setdefault('SDL_HINT_RENDER_SCALE_QUALITY', '2')
     pygame.init()
 
+    artist, album, date, title = args.artist, args.album, args.date, args.title
+    track, total = args.track, args.of
+    album_duration = 45 * 60.0
+    boundaries = [album_duration * i / total for i in range(total)]
+    elapsed = 0.42 if args.elapsed is None else args.elapsed
     art = args.art
+    if args.album_dir:
+        tracks, cover = _album_info(args.album_dir)
+        total = len(tracks)
+        track = max(1, min(track, total))
+        lengths = [t['length'] for t in tracks]
+        boundaries = [sum(lengths[:i]) for i in range(total)]
+        album_duration = sum(lengths)
+        current = tracks[track - 1]
+        artist = current['artist'] or artist
+        album = current['album'] or album
+        date = current['date'] or date
+        title = current['title']
+        art = art or cover
+        if args.elapsed is None:        # halfway through the chosen track
+            elapsed = (boundaries[track - 1] + lengths[track - 1] / 2) / album_duration
     if art is None:
         art = _placeholder_art(os.path.join(os.path.dirname(os.path.abspath(args.out)),
                                             '_shot_art.png'))
@@ -98,7 +151,7 @@ def main(argv=None):
         effects=[e for e in args.effects.split(',') if e], grooves=args.grooves)
     # A non-empty album path is required: VinylRenderer.get_vinyl_style()
     # resolves no style for a falsy path and the disc silently renders black.
-    display = Display(config, _FakePlayer(art, '/lp-shot/album'), port=0,
+    display = Display(config, _FakePlayer(art, args.album_dir or '/lp-shot/album'), port=0,
                       settings=settings)
 
     display.window = sdl2_video.Window('lp-shot', size=(width, height), hidden=True)
@@ -107,19 +160,17 @@ def main(argv=None):
     display._load_fonts()
     display._build_needle_texture()
 
-    album_duration = 45 * 60.0
-    boundaries = [album_duration * i / args.of for i in range(args.of)]
     status = {
         'playing': True,
-        'artist': args.artist,
-        'album': args.album,
-        'track_title': args.title,
-        'track_number': args.track,
-        'total_tracks': args.of,
-        'date': args.date,
+        'artist': artist,
+        'album': album,
+        'track_title': title,
+        'track_number': track,
+        'total_tracks': total,
+        'date': date,
         'progress': {
             'album_duration': album_duration,
-            'elapsed': album_duration * args.elapsed,
+            'elapsed': album_duration * elapsed,
             'track_boundaries': boundaries,
         },
     }
