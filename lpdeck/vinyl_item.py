@@ -159,10 +159,14 @@ class VinylItem(QQuickPaintedItem):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         side = min(self.width(), self.height())
         dst = QRectF((self.width() - side) / 2, (self.height() - side) / 2, side, side)
+        # save/restore rather than resetTransform: the painter arrives with Qt's
+        # device-pixel-ratio scale already applied, and resetting drops it, which
+        # drew the fixed shine at the wrong size and place on a scaled display.
+        p.save()
         p.translate(dst.center())
         p.rotate(self._angle)
         p.translate(-dst.center())
         p.drawImage(dst, self._disc, QRectF(self._disc.rect()))
-        p.resetTransform()
+        p.restore()
         if self._shine is not None:
             p.drawImage(dst, self._shine, QRectF(self._shine.rect()))

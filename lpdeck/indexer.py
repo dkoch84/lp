@@ -105,3 +105,27 @@ def index_library(con, music_path, progress=None):
                 progress(n_art, n_alb, n_trk)
     con.commit()
     return n_art, n_alb, n_trk
+
+
+def _inside(path, root):
+    root = os.path.normpath(root)
+    path = os.path.normpath(path)
+    return path == root or path.startswith(root + os.sep)
+
+
+def prune_outside(con, music_path):
+    """Remove everything that isn't under music_path, for when the library
+    folder changes. Deleting an album cascades to its tracks, and from those to
+    playlist entries and play history (foreign keys are on, see db.connect).
+    Artists left with no albums go too, and so do vinyl overrides that pointed
+    at a removed album or artist. Returns the number of albums removed."""
+    gone = [row["id"] for row in con.execute("SELECT id, path FROM albums")
+            if not _inside(row["path"], music_path)]
+    con.executemany("DELETE FROM albums WHERE id=?", [(i,) for i in gone])
+    con.execute("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)")
+    con.execute("DELETE FROM vinyl_overrides WHERE scope='album' "
+                "AND scope_id NOT IN (SELECT id FROM albums)")
+    con.execute("DELETE FROM vinyl_overrides WHERE scope='artist' "
+                "AND scope_id NOT IN (SELECT id FROM artists)")
+    con.commit()
+    return len(gone)

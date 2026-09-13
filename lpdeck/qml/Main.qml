@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import Lpdeck
 
@@ -23,9 +24,26 @@ ApplicationWindow {
     property string vScope: "album"
     property string vStyle: "black"
     property string vLabel: "label-white"
+    property var vEffects: []
+    property string vGrooves: "auto"
     function loadVinyl() {
         var v = controller.currentVinyl()
-        vStyle = v.style; vLabel = v.label
+        vStyle = v.style; vLabel = v.label; vEffects = v.effects || []
+        vGrooves = v.grooves || "auto"
+    }
+    // Swatches that show album art (the picture disc, the album-art label)
+    // carry the playing album's id so they draw its real cover; the rest
+    // leave it out and stay cached once for every album.
+    function vinylSwatch(style, label) {
+        var art = style === "picture" || label === "art"
+        return "image://vinyl/" + style + "~" + label
+               + (art && controller ? "~" + controller.npAlbumId : "")
+    }
+    function toggleEffect(id, on) {
+        var e = vEffects.filter(function(x) { return x !== id })
+        if (on) e.push(id)
+        vEffects = e
+        controller.setVinylEffects(vScope, e)
     }
     function applyVinyl() { controller.setVinyl(vScope, vStyle, vLabel, 100) }
     function openVinylConfig() { loadVinyl(); vinylConfig = true }
@@ -1632,12 +1650,40 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 IconButton { glyph: "✕"; onClicked: settingsPopup.close() }
             }
+
+            // ---- Music library ----
+            Label { text: "Music library"; color: theme.textDim
+                    font.pixelSize: 12; Layout.topMargin: 6 }
+            Label {
+                text: controller.musicFolder || "No folder chosen"
+                color: theme.text; font.pixelSize: 13
+                elide: Text.ElideMiddle; Layout.fillWidth: true
+            }
+            RowLayout {
+                spacing: 8
+                Pill { label: "Choose folder…"; onClicked: libraryFolderDialog.open() }
+                Pill { label: "Rescan"; visible: !controller.scanning
+                       onClicked: controller.rescanLibrary() }
+            }
+            Label {
+                visible: text !== ""
+                text: controller.scanStatus
+                color: theme.textDim; font.pixelSize: 11
+                elide: Text.ElideRight; Layout.fillWidth: true
+            }
+            FolderDialog {
+                id: libraryFolderDialog
+                title: "Choose your music folder"
+                currentFolder: controller.musicFolder ? "file://" + controller.musicFolder : ""
+                onAccepted: controller.setMusicFolder(selectedFolder)
+            }
+
             Label { text: "Theme"; color: theme.textDim
                     font.pixelSize: 12; Layout.topMargin: 6 }
             Segmented {
                 options: [{ label: "Dark", value: true }, { label: "Light", value: false }]
                 current: controller.darkMode
-                onPicked: controller.setDarkMode(value)
+                onPicked: (value) => controller.setDarkMode(value)
             }
             Label { text: "Sort artists"; color: theme.textDim
                     font.pixelSize: 12; Layout.topMargin: 6 }
@@ -1645,7 +1691,7 @@ ApplicationWindow {
                 options: [{ label: "Name A–Z", value: "name_asc" },
                           { label: "Name Z–A", value: "name_desc" }]
                 current: controller.artistSort
-                onPicked: controller.setArtistSort(value)
+                onPicked: (value) => controller.setArtistSort(value)
             }
             Label { text: "Sort albums"; color: theme.textDim
                     font.pixelSize: 12; Layout.topMargin: 6 }
@@ -1653,7 +1699,7 @@ ApplicationWindow {
                 options: [{ label: "Year", value: "year" },
                           { label: "Name", value: "name" }]
                 current: controller.albumSort
-                onPicked: controller.setAlbumSort(value)
+                onPicked: (value) => controller.setAlbumSort(value)
             }
             Label { text: "Grid size"; color: theme.textDim
                     font.pixelSize: 12; Layout.topMargin: 6 }
@@ -1662,7 +1708,7 @@ ApplicationWindow {
                           { label: "Medium", value: 152 },
                           { label: "Large", value: 188 }]
                 current: controller.gridTile
-                onPicked: controller.setGridTile(value)
+                onPicked: (value) => controller.setGridTile(value)
             }
 
             Rectangle { Layout.fillWidth: true; Layout.topMargin: 8
@@ -1676,7 +1722,7 @@ ApplicationWindow {
                 Segmented {
                     options: [{ label: "On", value: true }, { label: "Off", value: false }]
                     current: controller.eqEnabled
-                    onPicked: controller.setEqEnabled(value)
+                    onPicked: (value) => controller.setEqEnabled(value)
                 }
             }
             Flow {
@@ -1738,7 +1784,7 @@ ApplicationWindow {
                           { label: "Track", value: "track" },
                           { label: "Album", value: "album" }]
                 current: controller.replayGainMode
-                onPicked: controller.setReplayGainMode(value)
+                onPicked: (value) => controller.setReplayGainMode(value)
             }
             Label { visible: controller.replayGainMode !== "none"
                     text: "Applies after restart."
@@ -2044,7 +2090,7 @@ ApplicationWindow {
                            { label: "This artist", value: "artist" },
                            { label: "Everything", value: "global" }]
                     current: win.vScope
-                    onPicked: { win.vScope = value; win.applyVinyl() }
+                    onPicked: (value) => { win.vScope = value; win.applyVinyl() }
                 }
             }
 
@@ -2078,7 +2124,7 @@ ApplicationWindow {
                                     delegate: Swatch {
                                         required property var modelData
                                         diameter: 120
-                                        source: "image://vinyl/" + modelData.value + "~" + win.vLabel
+                                        source: win.vinylSwatch(modelData.value, win.vLabel)
                                         caption: modelData.label
                                         selected: win.vStyle === modelData.value
                                         onClicked: { win.vStyle = modelData.value
@@ -2103,10 +2149,43 @@ ApplicationWindow {
                             delegate: Swatch {
                                 required property var modelData
                                 diameter: 120
-                                source: "image://vinyl/" + win.vStyle + "~" + modelData.value
+                                source: win.vinylSwatch(win.vStyle, modelData.value)
                                 caption: modelData.label
                                 selected: win.vLabel === modelData.value
                                 onClicked: { win.vLabel = modelData.value; win.applyVinyl() }
+                            }
+                        }
+                    }
+                    Rectangle { Layout.fillWidth: true; implicitHeight: 1
+                                color: theme.line; Layout.topMargin: 8 }
+                    Label {
+                        text: "EFFECTS"; color: theme.textDim; font.pixelSize: 12
+                        font.weight: Font.DemiBold; font.letterSpacing: 1
+                        Layout.topMargin: 6
+                    }
+                    RowLayout {
+                        spacing: 12
+                        Label { text: "Grooves"; color: theme.textDim; font.pixelSize: 13 }
+                        Segmented {
+                            options: controller.vinylGrooves
+                            current: win.vGrooves
+                            onPicked: (value) => { win.vGrooves = value
+                                        controller.setVinylGrooves(win.vScope, value) }
+                        }
+                    }
+                    RowLayout {
+                        spacing: 12
+                        Label { text: "Finish"; color: theme.textDim; font.pixelSize: 13 }
+                        Row {
+                            spacing: 8
+                            Repeater {
+                                model: controller.vinylEffects
+                                delegate: Pill {
+                                    required property var modelData
+                                    label: modelData.label
+                                    selected: win.vEffects.indexOf(modelData.value) >= 0
+                                    onClicked: win.toggleEffect(modelData.value, !selected)
+                                }
                             }
                         }
                     }

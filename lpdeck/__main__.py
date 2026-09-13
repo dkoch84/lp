@@ -6,13 +6,12 @@ the same config.yml the kiosk uses, by default.
 import json
 import os
 import sys
-import threading
 
 import yaml
 
 from lpcore.player import PlayerBackend
 from lpcore.scrobbler import Scrobbler
-from . import db, indexer, mpris
+from . import db, mpris
 from .player import QueuePlayer
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -63,19 +62,17 @@ def main():
     scrobbler = Scrobbler(backend, config.get("lastfm", {}))   # req #9
     player = QueuePlayer(backend, scrobbler)
 
-    # Index the library in the background (own connection — sqlite isn't shared
-    # across threads), then refresh the artist model via the queued signal.
+    # The library is indexed in the background once the window is up; see
+    # Controller.start_index.
     mpris_handle = mpris.start_mpris(player)   # media keys / desktop controls
 
     def on_ready(controller):
         _restore_session(player)               # resume last session (paused)
-
-        def reindex():
-            c = db.connect(db_path)
-            indexer.index_library(c, music_path)
-            c.close()
-            controller.libraryChanged.emit()
-        threading.Thread(target=reindex, daemon=True).start()
+        # A folder picked in Settings wins over config.yml (which the kiosk shares).
+        chosen = str(QSettings("lp-deck", "lp-deck").value("musicFolder", "") or "")
+        folder = chosen if chosen and os.path.isdir(chosen) else music_path
+        controller.use_music_folder(folder)
+        controller.start_index(folder)
 
     try:
         sys.exit(qmlapp.run(con, player, db_path, on_ready=on_ready))

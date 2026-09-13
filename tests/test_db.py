@@ -395,3 +395,56 @@ def test_artist_covers_caps_per_artist(con):
                     (aid, f"A{i}", f"20{i:02d}", f"A{i}", f"/music/A{i}", f"/art/{i}.jpg"))
     con.commit()
     assert len(db.artist_covers(con, limit=4)[aid]) == 4
+
+
+# --- library folder change: prune_outside ------------------------------------
+
+def test_prune_removes_albums_outside_the_new_folder_and_what_hangs_off_them(con):
+    """Switching the library folder must leave only the new folder's albums.
+    Their tracks, playlist entries and play history go with them (cascades),
+    as do empty artists and vinyl overrides aimed at removed albums/artists."""
+    from lpdeck import indexer
+    keep_artist, keep_album, keep_tracks = _seed(con, artist="Kept", album="Here")
+    gone_artist, gone_album, gone_tracks = _seed(con, artist="Gone", album="There")
+    # move the second album outside /music
+    con.execute("UPDATE albums SET path=? WHERE id=?", ("/old-library/Gone/There", gone_album))
+    pl = con.execute("INSERT INTO playlists(name) VALUES ('mix')").lastrowid
+    con.executemany("INSERT INTO playlist_tracks(playlist_id, track_id, position) VALUES (?,?,?)",
+                    [(pl, keep_tracks[0], 0), (pl, gone_tracks[0], 1)])
+    con.executemany("INSERT INTO play_history(track_id, played_at) VALUES (?, 1)",
+                    [(keep_tracks[0],), (gone_tracks[0],)])
+    for scope, sid in (("album", keep_album), ("album", gone_album),
+                       ("artist", keep_artist), ("artist", gone_artist)):
+        db.set_vinyl_override(con, scope, sid, {"style": "black"})
+    db.set_vinyl_override(con, "global", None, {"style": "clear"})
+    con.commit()
+
+    assert indexer.prune_outside(con, "/music") == 1
+
+    def ids(sql):
+        return {r[0] for r in con.execute(sql)}
+    assert ids("SELECT id FROM albums") == {keep_album}
+    assert ids("SELECT id FROM artists") == {keep_artist}
+    assert ids("SELECT id FROM tracks") == set(keep_tracks)
+    assert ids("SELECT track_id FROM playlist_tracks") == {keep_tracks[0]}
+    assert ids("SELECT track_id FROM play_history") == {keep_tracks[0]}
+    assert ids("SELECT id FROM playlists") == {pl}                      # the playlist itself stays
+    scopes = {(r["scope"], r["scope_id"]) for r in con.execute("SELECT scope, scope_id FROM vinyl_overrides")}
+    assert scopes == {("album", keep_album), ("artist", keep_artist), ("global", None)}
+
+
+def test_prune_keeps_everything_inside_the_folder(con):
+    from lpdeck import indexer
+    _seed(con, artist="A", album="One")
+    _seed(con, artist="B", album="Two")
+    assert indexer.prune_outside(con, "/music/") == 0
+    assert con.execute("SELECT count(*) FROM albums").fetchone()[0] == 2
+
+
+def test_prune_does_not_mistake_a_sibling_folder_for_the_library(con):
+    """/music-old starts with the text /music but is not inside it."""
+    from lpdeck import indexer
+    _aid, alid, _t = _seed(con, artist="A", album="One")
+    con.execute("UPDATE albums SET path='/music-old/A/One' WHERE id=?", (alid,))
+    con.commit()
+    assert indexer.prune_outside(con, "/music") == 1

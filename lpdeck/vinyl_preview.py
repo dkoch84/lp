@@ -17,12 +17,14 @@ _BOUNDS = [0, 80, 160, 240]      # a few fake tracks so grooves have gaps
 _DUR = 240.0
 
 
-def preview(style, label, size):
-    """An art-less disc QImage for (style, label) at `size`×`size` px."""
+def preview(style, label, size, art_path=None):
+    """A disc QImage for (style, label) at `size`×`size` px. `art_path` is the
+    cover shown by the picture disc and the album-art label; without it they
+    fall back to a plain black disc and label."""
     _ensure_pygame()
     with _LOCK:
         renderer = VinylRenderer(VinylSettings(style=style, label=label))
-        disc, _ = composite_disc(renderer, size, _BOUNDS, _DUR, art_path=None,
+        disc, _ = composite_disc(renderer, size, _BOUNDS, _DUR, art_path=art_path,
                                  album_path="preview", artist="", album="",
                                  with_shine=False)
         return disc

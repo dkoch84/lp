@@ -133,7 +133,7 @@ def main():
 
     engine = QQmlApplicationEngine()
     engine.addImageProvider("tiles", qmlapp.TileProvider(DB_PATH))
-    engine.addImageProvider("vinyl", qmlapp.VinylPreviewProvider())
+    engine.addImageProvider("vinyl", qmlapp.VinylPreviewProvider(DB_PATH))
     ctx = engine.rootContext()
     ctx.setContextProperty("artistsModel", artists)
     ctx.setContextProperty("queueModel", queue)

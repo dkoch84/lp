@@ -12,7 +12,7 @@ import subprocess
 import threading
 import time
 
-from PySide6.QtCore import (Property, QAbstractListModel, QModelIndex, QObject,
+from PySide6.QtCore import (Property, QAbstractListModel, QModelIndex, QObject, QUrl,
                             QSettings, Qt, QTimer, Signal, Slot)
 from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
@@ -25,6 +25,7 @@ from lpcore.vinyl.fractals import NEBULA_VARIANTS
 from lpcore.vinyl.settings import VinylSettings
 from lpcore import lyrics as lyrics_mod
 from . import db, meta, mosaic, vinyl_preview
+from . import indexer
 from .vinyl_item import VinylItem
 
 QML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qml")
@@ -101,24 +102,55 @@ class TileProvider(QQuickImageProvider):
 
 
 class VinylPreviewProvider(QQuickImageProvider):
-    """`image://vinyl/<style>~<label>` → a static disc swatch for the chooser."""
-    def __init__(self):
+    """`image://vinyl/<style>~<label>[~<album id>]` → a static disc swatch for
+    the chooser.
+
+    The album id is only added for swatches that show album art (the picture
+    disc, or the album-art label), so those draw the real cover; every other
+    swatch is rendered once and shared by all albums. Runs on the scene-graph
+    worker threads (the chooser's images are asynchronous), so sqlite
+    connections are per thread.
+    """
+    def __init__(self, db_path=None):
         super().__init__(QQuickImageProvider.Image)
+        self._db_path = db_path
+        self._local = threading.local()
         self._cache_dir = os.path.join(
             os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
             "lp-deck", "vinyl-previews")
         os.makedirs(self._cache_dir, exist_ok=True)
 
+    def _cover(self, album_id):
+        if not self._db_path or album_id < 0:
+            return None
+        con = getattr(self._local, "con", None)
+        if con is None:
+            con = db.connect(self._db_path)
+            self._local.con = con
+        row = con.execute("SELECT cover_path FROM albums WHERE id=?", (album_id,)).fetchone()
+        path = row["cover_path"] if row else None
+        return path if path and os.path.exists(path) else None
+
     def requestImage(self, image_id, size, requested):
-        style, _, label = image_id.partition("~")
+        style, label, album = (image_id.split("~") + ["", ""])[:3]
         label = label or "label-white"
         edge = requested.width() if requested.width() > 0 else 160
-        safe = f"{style}_{label}_{edge}".replace("/", "_")
+        art = None
+        if album:
+            try:
+                art = self._cover(int(album))
+            except ValueError:
+                art = None
+        tag = f"_album{album}" if art else ""
+        safe = f"{style}_{label}{tag}_{edge}".replace("/", "_")
         cache_path = os.path.join(self._cache_dir, safe + ".png")
-        cached = QImage(cache_path)
-        if not cached.isNull():
-            return cached
-        img = vinyl_preview.preview(style, label, edge)
+        fresh = os.path.exists(cache_path) and (
+            not art or os.path.getmtime(cache_path) >= os.path.getmtime(art))
+        if fresh:
+            cached = QImage(cache_path)
+            if not cached.isNull():
+                return cached
+        img = vinyl_preview.preview(style, label, edge, art_path=art)
         img.save(cache_path, "PNG")
         return img
 
@@ -229,6 +261,10 @@ class Controller(QObject):
     songsChanged = Signal()
     vinylChanged = Signal()
     transportChanged = Signal()          # shuffle / repeat / volume / mute
+    libraryFolderChanged = Signal()
+    scanChanged = Signal()               # scanning state / status text
+    _scanProgress = Signal(int, int, int)    # indexer thread → GUI thread
+    _scanDone = Signal(str)
     _bump = Signal()                     # backend thread → GUI thread marshalling
 
     ALBUM_ORDERS = {"year": "al.year, al.name", "name": "al.name, al.year"}
@@ -284,11 +320,118 @@ class Controller(QObject):
             self.player.backend.on(ev, self._bump.emit)
         self.libraryChanged.connect(self.artists.reload)
 
+        # music library folder + background scanning
+        self.db_path = None                  # set by run()
+        self._music_folder = ""
+        self._scanning = False
+        self._scan_status = ""
+        self._scan_pending = None
+        self._fill_while_scanning = False
+        self._scanProgress.connect(self._on_scan_progress)
+        self._scanDone.connect(self._on_scan_done)
+
         # tick the queue footer (remaining time) once a second while playing
         self._ticker = QTimer(self)
         self._ticker.setInterval(1000)
         self._ticker.timeout.connect(self.progressChanged)
         self._ticker.start()
+
+    # --- music library folder ---
+
+    def use_music_folder(self, path):
+        """The folder in effect at startup (from settings or config.yml)."""
+        self._music_folder = path or ""
+        self.libraryFolderChanged.emit()
+
+    @Property(str, notify=libraryFolderChanged)
+    def musicFolder(self):
+        return self._music_folder
+
+    @Property(bool, notify=scanChanged)
+    def scanning(self):
+        return self._scanning
+
+    @Property(str, notify=scanChanged)
+    def scanStatus(self):
+        return self._scan_status
+
+    @Slot("QVariant")
+    def setMusicFolder(self, folder):
+        """Switch the library to `folder` (a QUrl from the folder dialog, or a
+        path): remember it, scan it, and drop albums from the old folder."""
+        if isinstance(folder, QUrl):
+            path = folder.toLocalFile()
+        else:
+            folder = str(folder or "")
+            path = QUrl(folder).toLocalFile() if folder.startswith("file:") else folder
+        if not path or not os.path.isdir(path):
+            self._scan_status = f"Folder not found: {path}"
+            self.scanChanged.emit()
+            return
+        path = os.path.normpath(path)
+        self._settings.setValue("musicFolder", path)
+        self._music_folder = path
+        self.libraryFolderChanged.emit()
+        self.start_index(path, prune=True)
+
+    @Slot()
+    def rescanLibrary(self):
+        if self._music_folder:
+            self.start_index(self._music_folder)
+
+    def start_index(self, path, prune=False):
+        """Scan `path` into the library on a background thread (its own sqlite
+        connection). A request made while a scan runs is kept and run next."""
+        if self._scanning:
+            self._scan_pending = (path, prune or bool(self._scan_pending and self._scan_pending[1]))
+            return
+        self._scanning = True
+        self._scan_status = "Scanning…"
+        # a first scan fills the empty artist list as it goes; otherwise the
+        # list is left alone until the end, so browsing isn't reset under you
+        self._fill_while_scanning = self.artists.rowCount() == 0
+        self.scanChanged.emit()
+        db_path = self.db_path
+
+        def work():
+            status = ""
+            try:
+                c = db.connect(db_path)
+                last = [0.0]
+
+                def progress(n_art, n_alb, n_trk):
+                    now = time.monotonic()
+                    if now - last[0] >= 1.0:
+                        last[0] = now
+                        self._scanProgress.emit(n_art, n_alb, n_trk)
+                try:
+                    n_art, n_alb, n_trk = indexer.index_library(c, path, progress)
+                    if prune:
+                        indexer.prune_outside(c, path)
+                finally:
+                    c.close()
+                status = f"{n_art} artists, {n_alb} albums, {n_trk} tracks"
+            except Exception as e:           # an unreadable folder must not kill the app
+                status = f"Scan failed: {e}"
+            self._scanDone.emit(status)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_scan_progress(self, n_art, n_alb, n_trk):
+        self._scan_status = f"Scanning… {n_art} artists, {n_alb} albums"
+        self.scanChanged.emit()
+        if self._fill_while_scanning:
+            self.artists.reload()
+
+    def _on_scan_done(self, status):
+        self._scanning = False
+        self._scan_status = status
+        self.scanChanged.emit()
+        self.libraryChanged.emit()
+        if self._scan_pending:
+            path, prune = self._scan_pending
+            self._scan_pending = None
+            self.start_index(path, prune)
 
     # --- search ---
 
@@ -569,8 +712,8 @@ class Controller(QObject):
 
     @Property("QVariantList", constant=True)
     def vinylLabels(self):
-        return [{"value": f"label-{c}", "label": c.title()}
-                for c in LABEL_COLORS.keys()]
+        return [{"value": "art", "label": "Album art"}] + [
+            {"value": f"label-{c}", "label": c.title()} for c in LABEL_COLORS.keys()]
 
     @Property(int, notify=nowPlayingChanged)
     def npAlbumId(self):
@@ -585,7 +728,8 @@ class Controller(QObject):
         """The vinyl settings in effect for the now-playing track (for the UI)."""
         spec = self.vinyl_now()
         s = spec["settings"] if spec else VinylSettings()
-        return {"style": s.style, "label": s.label, "brightness": s.brightness}
+        return {"style": s.style, "label": s.label, "brightness": s.brightness,
+                "effects": list(s.effects), "grooves": s.grooves}
 
     @Slot(str, str, str, int)
     def setVinyl(self, scope, style, label, brightness):
@@ -602,6 +746,43 @@ class Controller(QObject):
         if scope != "global" and (scope_id is None or scope_id < 0):
             return
         db.set_vinyl_override(self.con, scope, scope_id, base)
+        self.vinylChanged.emit()
+
+    @Property("QVariantList", constant=True)
+    def vinylEffects(self):
+        """Vinyl Effects, finishes the chooser offers on top of any style."""
+        from lpcore.vinyl.catalog import VINYL_EFFECTS
+        return [{"value": k, "label": v} for k, v in VINYL_EFFECTS.items()]
+
+    @Property("QVariantList", constant=True)
+    def vinylGrooves(self):
+        """Groove treatments: how the grooves catch the light, one per record."""
+        from lpcore.vinyl.catalog import GROOVE_TREATMENTS
+        return [{"value": k, "label": v} for k, v in GROOVE_TREATMENTS.items()]
+
+    @Slot(str, "QVariantList")
+    def setVinylEffects(self, scope, effects):
+        """Write the Vinyl Effects at scope, keeping every other setting there."""
+        self._save_vinyl_change(scope, effects=list(effects))
+
+    @Slot(str, str)
+    def setVinylGrooves(self, scope, grooves):
+        """Write the groove treatment at scope, keeping every other setting there."""
+        self._save_vinyl_change(scope, grooves=grooves)
+
+    def _save_vinyl_change(self, scope, **changes):
+        spec = self.vinyl_now()
+        current = VinylSettings.from_dict((spec["settings"] if spec else VinylSettings()).to_dict())
+        try:
+            current.update(**changes)
+        except ValueError:
+            return
+        scope_id = {"global": None, "artist": self._np_artist_id,
+                    "album": self._np_album_id,
+                    "playlist": self._np_playlist_id}.get(scope)
+        if scope != "global" and (scope_id is None or scope_id < 0):
+            return
+        db.set_vinyl_override(self.con, scope, scope_id, current.to_dict())
         self.vinylChanged.emit()
 
     # --- add to queue / play next (req: queue ops) ---
@@ -1097,10 +1278,11 @@ def run(con, player, db_path, on_ready=None):
     artists = ArtistsModel(con)
     queue = QueueModel(player)
     controller = Controller(con, player, artists, queue)
+    controller.db_path = db_path
 
     engine = QQmlApplicationEngine()
     engine.addImageProvider("tiles", TileProvider(db_path))
-    engine.addImageProvider("vinyl", VinylPreviewProvider())
+    engine.addImageProvider("vinyl", VinylPreviewProvider(db_path))
     ctx = engine.rootContext()
     ctx.setContextProperty("artistsModel", artists)
     ctx.setContextProperty("queueModel", queue)
