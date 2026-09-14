@@ -1,191 +1,88 @@
-![DEATH](screenshots/README-DEATH.png)
-
 # lp
+
+Plays albums like a record player plays albums. A spinning record on your screen, and your phone as the remote.
+
+Stop changing tracks, stop switching playlists, stop making playlists. Good bands already make 'em, they call them albums.
+
+Install, setup and everything else: [docs](docs/README.md).
 
 ## Crucible & Ruin
 
-![image](screenshots/crucible-and-ruin.jpg)
+![Howling Giant, Crucible & Ruin, on teal-marble vinyl](screenshots/kiosk-howling-giant.jpg)
 
+- **Teal-marble vinyl**: the one above.
+- **Vinyl effects**: glass, deep edge and rim light, plus four groove looks.
+- **Favorite styles**: star the ones you like, hide the rest.
+- **Looks that stick**: your look survives a restart, and an album can keep its own.
+- **Black background**: set the frame and panel colours yourself.
+- **Track line**: the track number and title under the year.
+- **Play next**: tap an album while one is on and lp asks first.
+- **Recently played**: only counts an album once a song has finished.
+- **Scrobbling**: paused time doesn't count, and offline scrobbles are sent later.
+- **Updates itself**: installs a new release once the album you are playing ends. [Install](docs/install.md)
+- **Album videos**: render a whole album as a video, with chapters for YouTube. [How](docs/album-video.md)
+- **lp-deck** and **lp-studio**: see below.
 
-What lands in this release:
+## lp-deck
 
-**On the record**
+The same record on the desktop, in a full music player: playlists, search, a queue, lyrics, an equalizer and media keys.
 
-- **Teal-marble vinyl**: translucent teal smoke with dark veins running through it, the disc in the shot above.
-- **Vinyl Effects**: finishes that go over any style (glass, deep edge, rim light), plus a choice of groove look (auto, shine, shadow or smooth), picked from the web UI.
-- **Favorite styles**: star the colors and fractals you like, then filter each gallery down to just those.
-- **Looks that stick**: the look survives a restart, and an album can keep a look of its own: switch the vinyl page to "This album" while it plays.
-- **Frame and panel colours**: yours to set; pure black lets a cover with a dark edge sit flush.
-- **The track**: the now-playing screen shows the track number and title under the year.
+![lp-deck playing Crucible & Ruin](screenshots/deck-now-playing.png)
 
-**Playing it**
+![lp-deck with the queue open](screenshots/deck-queue.png)
 
-- **Play next**: tapping an album while a record is on asks first, and Play next queues it for when this one ends.
-- **Recently played** counts an album once a song of it has finished, so mis-taps never land on the shelf, and anything there can be removed.
-- **Better Scrobbling**: paused time no longer counts toward a scrobble, and scrobbles made while offline are kept and sent once Last.fm is reachable again.
+Pick a vinyl for one album, one artist, or everything.
 
-**Around it**
+![lp-deck vinyl look](screenshots/deck-vinyl-look.png)
 
-- **Updates itself**: install once from a release and lp fetches each new one, switching over after the album you are playing ends. The release chip in the header shows what is installed, the notes, and the update controls. No ssh, no root. See [Install](#install).
-- **The album as a video**: render a whole album as the kiosk plays it, with gapless audio and YouTube chapters. See [below](#the-album-as-a-video).
-- **lp-deck and lp-studio**: the same engine now drives a desktop player (smart playlists, queue editing, media keys, tray) and a bench for designing vinyl styles, which is where teal-marble came from.
+## lp-studio
 
----
+Where vinyl styles are made. Move a slider, watch the record change. Teal-marble came from here.
 
-### Stop changing tracks, stop switching playlists, stop making playlists. Good bands already make 'em, they call them albums. 
+![lp-studio with teal-marble](screenshots/studio-teal-marble.png)
 
-A music player that plays albums like a record player plays albums. Pygame renders a spinning vinyl and the album art on your display while a web UI lets you browse and control playback from your phone.
+## The web UI
 
-Touch-friendly web UI. Browse your library, tap an album, melt.
+Your phone is the remote. Browse the library, tap an album, it plays.
 
-LastFM scrobbling so you know how long you were faded last night.
+<img src="screenshots/web-home.png" width="260" alt="Library">
 
-Take screenshots, the next 3 were taken with the new feature. Also improved is the look of the grooves on all the patterns.  
+### Play next
 
-![alt text](screenshots/image.png)
+When a record is on, lp asks before cutting it off. Play next puts the album in the queue.
 
-![Clear](screenshots/lp-1779231276.png)
+<img src="screenshots/web-play-sheet.png" width="260" alt="Play now or play next"> <img src="screenshots/web-queued-footer.png" width="260" alt="Next up in the footer"> <img src="screenshots/web-queue-sheet.png" width="260" alt="The queue">
 
-Better clear vinyl rendering with iridescent refraction and platter shimmer.
+### Updates
 
-![Munafo1](screenshots/lp-1779231189.png)
+Tap the release name to see what you have. Install a new one now, or after this album.
 
-Ultra Deep-zoom Mandelbrot vinyls
+<img src="screenshots/web-release-sheet.png" width="260" alt="Release sheet">
 
-![Fractal Discs](screenshots/lp-1779231154.png)
+### Looks and favorites
 
-Use any fractal pattern as the full vinyl, just like Picture Discs
+Change the vinyl for every album, or just the one playing. Star the styles you like and show only those.
 
-![Library](screenshots/README-library.png)
+<img src="screenshots/web-vinyl-this-album.png" width="260" alt="This album keeps its own look"> <img src="screenshots/web-vinyl-favorites.png" width="260" alt="Favorite styles">
 
-Only one layer deep. Albums: select one and it plays.
+## On the kiosk
 
-![Artist](screenshots/README-library-artist.png)
+![Brutus, Unison Life](screenshots/kiosk-brutus.jpg)
 
-Colored vinyl, fractals, nebulae, label colors, brightness. Make it yours.
+Brutus, *Unison Life*: Munafo deep zoom.
 
-![Vinyl config](screenshots/README-vinyl-config.png)
+![Job for a Cowboy, Moon Healer](screenshots/kiosk-jfac.jpg)
 
-Subtle grooves in the vinyl mark each track on the album.
+Job for a Cowboy, *Moon Healer*: Munafo as a picture disc.
 
-![Player](screenshots/README-player.png)
+![Port Noir, The Dark We Keep](screenshots/kiosk-port-noir.jpg)
 
-Tracks are accurately marked. The needle follows the grooves as it plays.
+Port Noir, *The Dark We Keep*: clear vinyl.
 
-![Grooves](screenshots/README-grooves.png)
+![VOLA, Witness](screenshots/kiosk-vola.jpg)
 
-A sensible night.
+VOLA, *Witness*: Mandelbrot.
 
-![Kate Bush](screenshots/README-player-sane.png)
+![Karmanjakah, Diamond morning](screenshots/kiosk-karmanjakah.jpg)
 
-Get into the right headspace.
-
-![Mandelbrot](screenshots/README-player-crazy.png)
-
-\m/
-
-## Install
-
-For a kiosk or a desktop that should just work, install from the latest release
-and let it keep itself updated:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dkoch84/lp/master/deploy/install.sh | bash -s -- --music /path/to/music
-```
-
-lp then checks GitHub for the next release every few hours and switches to it
-once the album you are playing has finished; the web UI has **Check now** and
-**Install now** too. Nothing runs as root. Details, the kiosk service, and the
-release layout are in [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md).
-
-## The album as a video
-
-```bash
-make video ALBUM="/music/Howling Giant/2025 - Crucible & Ruin" OUT=crucible.mp4
-```
-
-Renders the whole album exactly as the kiosk plays it, vinyl spinning and the
-needle tracking through the grooves, to a 1080p HEVC MP4 with the album's audio
-joined gapless. The layers are drawn once by the kiosk renderer and ffmpeg
-composites them, so an album takes a few minutes with a hardware encoder
-(NVENC, VideoToolbox, QuickSync are picked up automatically). Beside it lands a `.txt` with the YouTube description: a
-timestamp per track, which YouTube turns into chapters. A free whole-album
-visualizer for any band. `--preview 20` renders the first twenty seconds to
-check the look; `--style`, `--effects` and the rest take the same values the
-web picker does; `--codec h264` for players without HEVC. lp-deck has the same
-thing as a **Video…** button on every album page. Needs ffmpeg.
-
-## Setup (from a checkout)
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp config.example.yml config.yml
-# Edit config.yml with your music library path
-python main.py
-```
-
-The web UI is at `http://localhost:8000`. The pygame display runs on whatever screen the process is on.
-
-## Config
-
-```yaml
-music_library_path: /path/to/music  # Artist/Album folder structure
-display:
-  fullscreen: false
-  width: 1920
-  height: 1080
-lastfm:
-  api_key: ""      # Optional, for scrobbling
-  api_secret: ""
-```
-
-## Features
-
-- Album playback via libVLC
-- A record that is on is not cut off by a stray tap: the web UI asks, and "Play next" queues the album for when this one ends
-- Recently played counts an album once a song of it has completed, so mis-taps never land on the shelf; anything there can be removed with its corner x
-- The look is saved (a restart keeps it), and an album can keep a look of its own: switch the vinyl page to "This album" while it plays
-- Frame and panel colours are yours to set; pure black lets a cover with a dark edge sit flush
-- Favorite vinyl styles, so a gallery can show just the ones you like
-- Pygame vinyl visualization with spinning record, needle, and track grooves
-- Web UI for browsing and playback control
-- Vinyl styles: black, colored, clear, picture disc, Mandelbrot fractals, nebulae
-- Customizable label colors
-- Last.fm scrobbling (authenticate from the web UI)
-
-## Architecture
-
-Meant to run on a Raspberry Pi connected to a TV or other display. The web UI is your remote.
-
-```
-main.py          Entry point
-lp/
-  player.py      VLC playback engine
-  display.py     Pygame vinyl renderer
-  library.py     Music library scanner
-  api.py         FastAPI REST server + static files
-  scrobbler.py   Last.fm integration
-static/          Web UI
-```
-
-### Just play the damn record.
-
-## Vinyl styles
-
-Random per album: black, colored, clear (with platter shimmer + iridescent
-refraction), picture disc, pattern picture disc (fractal as the full
-disc), and three fractal families:
-
-- **Mandelbrot**: classic escape-time fractal at named zooms (seahorse,
-  elephant, spiral, etc.) across a dozen color schemes.
-- **Nebula**: value-noise gas clouds in 19 color variants.
-- **Munafo Deep-Zoom**: `2.7×10⁻²²` deep-zoom Mandelbrot renders. The
-  9000×9000 gold archives + the GPU/perturbation engine that produced
-  them live in a separate repo: **[bongsweat](https://github.com/dkoch84/bongsweat)**. The
-  vinyl-size cache (`lp/cache/munafo/*.png`, ~14 MB) is committed here
-  and consumed at runtime by `_draw_munafo_vinyl()` in `lp/display.py`.
-
-Center labels follow the same families — any fractal variant can be
-chosen as the label.
+Karmanjakah, *Diamond morning*: cyan, with a cloud label.
