@@ -433,6 +433,22 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
                             + pattern_basic + pattern_mandelbrot
                             + pattern_nebula + pattern_munafo)}
 
+    @app.get("/api/settings/vinyl/favorites")
+    def get_vinyl_favorites():
+        """The set of favorited vinyl style ids (color/fractal variants).
+
+        Used by the web UI to filter the colors, mandelbrot, nebula and
+        munafo galleries down to favorites-only. Empty when no state store
+        is configured (tests, --no-display runs)."""
+        return {"favorites": state.get_vinyl_favorites() if state else []}
+
+    @app.post("/api/settings/vinyl/favorites/{style_id}")
+    def set_vinyl_favorite(style_id: str, req: FavoriteRequest):
+        if not state:
+            raise HTTPException(503, "state not available")
+        state.set_vinyl_favorite(style_id, req.favorite)
+        return {"id": style_id, "favorite": req.favorite}
+
     @app.get("/api/vinyl/preview/{style:path}")
     def vinyl_preview(style: str):
         from lpcore.vinyl.cache import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,

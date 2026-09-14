@@ -60,12 +60,50 @@
     }
 
     .vinyl-item {
+      position: relative;
       cursor: pointer;
       text-align: center;
       -webkit-tap-highlight-color: transparent;
     }
 
     .vinyl-item:active { opacity: 0.8; }
+
+    /* Per-style favorite star (color + fractal families only) */
+    .vfav-btn {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.55);
+      color: #ccc;
+      font-size: 1rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .vfav-btn:active { background: rgba(0, 0, 0, 0.75); }
+    .vfav-btn.is-fav { color: #ffcf40; }
+
+    /* Favorites / All mode toggle */
+    #fav-bar { padding: 14px 20px 0; }
+    .fav-toggle { display: flex; gap: 8px; }
+    .fav-toggle button {
+      flex: 1;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #1c1c1c;
+      color: #ccc;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .fav-toggle button.active { background: #4a3a1c; border-color: #a97; color: #ffcf40; }
 
     .vinyl-thumb {
       width: 100%;
@@ -343,6 +381,12 @@
     </div>
     <div id="scope-note"></div>
   </div>
+  <div id="fav-bar">
+    <div class="fav-toggle">
+      <button id="fav-all" class="active">All styles</button>
+      <button id="fav-only">★ Favorites</button>
+    </div>
+  </div>
   <div id="style-root"></div>
   <div id="controls-root"></div>
 
@@ -376,6 +420,12 @@
       ['nebula', 'Nebula'],
       ['munafo', 'Munafo Deep-Zoom'],
     ];
+    // Categories that can be favorited and hidden in Favorites mode. The Basic
+    // category is always shown in full.
+    const FAV_CATS = new Set(['color', 'mandelbrot', 'nebula', 'munafo']);
+
+    let vinylFavorites = new Set();       // favorited style ids
+    let favMode = localStorage.getItem('lp-vinyl-fav-mode') === '1';
 
     async function api(path, opts) {
       const res = await fetch(path, opts);
@@ -675,6 +725,20 @@
 
       div.appendChild(makeThumb(opt));
 
+      if (FAV_CATS.has(opt.category)) {
+        const isFav = vinylFavorites.has(opt.id);
+        const star = document.createElement('button');
+        star.className = 'vfav-btn' + (isFav ? ' is-fav' : '');
+        star.textContent = isFav ? '★' : '☆';
+        star.setAttribute('aria-label', 'Favorite style');
+        star.setAttribute('aria-pressed', String(isFav));
+        star.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleVinylFav(opt);
+        });
+        div.appendChild(star);
+      }
+
       const label = document.createElement('div');
       label.className = 'vinyl-label';
       label.textContent = opt.label;
@@ -698,10 +762,45 @@
       return c;
     }
 
+    // --- Favorites ---
+
+    async function toggleVinylFav(opt) {
+      const next = !vinylFavorites.has(opt.id);
+      try {
+        await api(`/api/settings/vinyl/favorites/${encodeURIComponent(opt.id)}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({favorite: next}),
+        });
+        if (next) vinylFavorites.add(opt.id); else vinylFavorites.delete(opt.id);
+        renderGalleries();
+      } catch (e) {
+        console.error('Vinyl favorite toggle failed', e);
+      }
+    }
+
+    const favAllBtn = document.getElementById('fav-all');
+    const favOnlyBtn = document.getElementById('fav-only');
+
+    function setFavMode(on) {
+      favMode = on;
+      localStorage.setItem('lp-vinyl-fav-mode', on ? '1' : '0');
+      favAllBtn.classList.toggle('active', !on);
+      favOnlyBtn.classList.toggle('active', on);
+      renderGalleries();
+    }
+
+    favAllBtn.addEventListener('click', () => setFavMode(false));
+    favOnlyBtn.addEventListener('click', () => setFavMode(true));
+
     function renderGalleries() {
       styleRoot.innerHTML = '';
       for (const [cat, title] of CATS) {
-        const items = options.filter(o => o.category === cat);
+        let items = options.filter(o => o.category === cat);
+        // Favorites mode hides non-favorited color/fractal styles; Basic stays.
+        if (favMode && FAV_CATS.has(cat)) {
+          items = items.filter(o => vinylFavorites.has(o.id));
+        }
         if (!items.length) continue;
         const section = document.createElement('div');
         section.className = 'section';
@@ -937,7 +1036,7 @@
     // --- Init ---
 
     async function init() {
-      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes, effectsRes, colorsRes] = await Promise.all([
+      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes, effectsRes, colorsRes, favRes] = await Promise.all([
         api('/api/settings/vinyl'),
         api('/api/settings/vinyl/options'),
         api('/api/settings/label'),
@@ -946,7 +1045,11 @@
         api('/api/settings/label-text/options'),
         api('/api/settings/effects'),
         api('/api/settings/colors'),
+        api('/api/settings/vinyl/favorites'),
       ]);
+      vinylFavorites = new Set(favRes.favorites || []);
+      favAllBtn.classList.toggle('active', !favMode);
+      favOnlyBtn.classList.toggle('active', favMode);
       await refreshScope();
       if (looksState && looksState.album_has_look) setScope('album');
       currentStyle = styleRes.style;

@@ -9,8 +9,8 @@ RECENT_ALBUMS_LIMIT = 8
 
 
 class UserState:
-    """Persists per-user library state: favorited artists, last-played times,
-    and the most recently played albums.
+    """Persists per-user library state: favorited artists, favorited vinyl
+    styles, last-played times, and the most recently played albums.
 
     Stored as JSON; safe to read/write from multiple threads.
     """
@@ -19,6 +19,7 @@ class UserState:
         self.path = path
         self._lock = threading.Lock()
         self.favorites = set()
+        self.vinyl_favorites = set()  # favorited vinyl style ids (color/fractal)
         self.last_played = {}
         self.grid_covers = {}  # artist -> ordered list of album folder names
         # Most-recent-first list of {"artist", "folder", "ts"}; capped at
@@ -33,6 +34,7 @@ class UserState:
             with open(self.path) as f:
                 data = json.load(f)
             self.favorites = set(data.get('favorites', []))
+            self.vinyl_favorites = set(data.get('vinyl_favorites', []))
             self.last_played = {
                 k: float(v) for k, v in data.get('last_played', {}).items()
             }
@@ -54,6 +56,7 @@ class UserState:
             with open(tmp, 'w') as f:
                 json.dump({
                     'favorites': sorted(self.favorites),
+                    'vinyl_favorites': sorted(self.vinyl_favorites),
                     'last_played': self.last_played,
                     'grid_covers': self.grid_covers,
                     'recent_albums': self.recent_albums,
@@ -72,6 +75,23 @@ class UserState:
                 self.favorites.add(artist)
             else:
                 self.favorites.discard(artist)
+            self._save_locked()
+
+    def get_vinyl_favorites(self):
+        """Sorted list of favorited vinyl style ids."""
+        with self._lock:
+            return sorted(self.vinyl_favorites)
+
+    def is_vinyl_favorite(self, style_id):
+        with self._lock:
+            return style_id in self.vinyl_favorites
+
+    def set_vinyl_favorite(self, style_id, value):
+        with self._lock:
+            if value:
+                self.vinyl_favorites.add(style_id)
+            else:
+                self.vinyl_favorites.discard(style_id)
             self._save_locked()
 
     def get_grid_covers(self, artist):

@@ -90,6 +90,41 @@ def test_get_recent_returns_copies():
     assert s.get_recent_albums()[0]['artist'] == 'A'
 
 
+def test_vinyl_favorites_empty():
+    s = _state()
+    assert s.get_vinyl_favorites() == []
+    assert s.is_vinyl_favorite('color-red') is False
+
+
+def test_vinyl_favorites_add_and_remove():
+    s = _state()
+    s.set_vinyl_favorite('color-red', True)
+    s.set_vinyl_favorite('mandelbrot-seahorse-purple', True)
+    assert s.is_vinyl_favorite('color-red') is True
+    assert s.get_vinyl_favorites() == ['color-red', 'mandelbrot-seahorse-purple']
+    s.set_vinyl_favorite('color-red', False)
+    assert s.is_vinyl_favorite('color-red') is False
+    assert s.get_vinyl_favorites() == ['mandelbrot-seahorse-purple']
+
+
+def test_vinyl_favorites_idempotent():
+    s = _state()
+    s.set_vinyl_favorite('nebula-lava-lamp', True)
+    s.set_vinyl_favorite('nebula-lava-lamp', True)  # no duplicate
+    assert s.get_vinyl_favorites() == ['nebula-lava-lamp']
+    s.set_vinyl_favorite('nebula-lava-lamp', False)
+    s.set_vinyl_favorite('nebula-lava-lamp', False)  # already gone, no error
+    assert s.get_vinyl_favorites() == []
+
+
+def test_vinyl_favorites_persist_across_reload():
+    s = _state()
+    s.set_vinyl_favorite('color-teal', True)
+    s.set_vinyl_favorite('munafo-deep5_v1', True)
+    reloaded = UserState(s.path)
+    assert reloaded.get_vinyl_favorites() == ['color-teal', 'munafo-deep5_v1']
+
+
 def _run():
     tests = [v for k, v in sorted(globals().items()) if k.startswith('test_')]
     for t in tests:
