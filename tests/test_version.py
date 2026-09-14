@@ -31,8 +31,8 @@ def test_the_current_release_reads_as_its_title(monkeypatch):
 
 def test_without_git_the_built_in_release_is_reported(monkeypatch):
     v = _version(monkeypatch, None)
-    assert v['release'] == version.RELEASE_NAME == 'ruined-crucible'
-    assert v['title'] == 'RuinedCrucible'
+    assert v['release'] == version.RELEASE_NAME == 'crucible-and-ruin'
+    assert v['title'] == 'Crucible & Ruin'
 
 
 def test_an_unknown_tag_reads_as_itself(monkeypatch):

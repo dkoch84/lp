@@ -9,11 +9,25 @@
 
 What lands in this release:
 
+**On the record**
+
 - **Teal-marble vinyl**: translucent teal smoke with dark veins running through it, the disc in the shot above.
 - **Vinyl Effects**: finishes that go over any style (glass, deep edge, rim light), plus a choice of groove look (auto, shine, shadow or smooth), picked from the web UI.
+- **Favorite styles**: star the colors and fractals you like, then filter each gallery down to just those.
+- **Looks that stick**: the look survives a restart, and an album can keep a look of its own: switch the vinyl page to "This album" while it plays.
+- **Frame and panel colours**: yours to set; pure black lets a cover with a dark edge sit flush.
 - **The track**: the now-playing screen shows the track number and title under the year.
+
+**Playing it**
+
+- **Play next**: tapping an album while a record is on asks first, and Play next queues it for when this one ends.
+- **Recently played** counts an album once a song of it has finished, so mis-taps never land on the shelf, and anything there can be removed.
 - **Better Scrobbling**: paused time no longer counts toward a scrobble, and scrobbles made while offline are kept and sent once Last.fm is reachable again.
-- **Web UI enhancements** usability, features.
+
+**Around it**
+
+- **Updates itself**: install once from a release and lp fetches each new one, switching over after the album you are playing ends. The release chip in the header shows what is installed, the notes, and the update controls. No ssh, no root. See [Install](#install).
+- **The album as a video**: render a whole album as the kiosk plays it, with gapless audio and YouTube chapters. See [below](#the-album-as-a-video).
 - **lp-deck and lp-studio**: the same engine now drives a desktop player (smart playlists, queue editing, media keys, tray) and a bench for designing vinyl styles, which is where teal-marble came from.
 
 ---
@@ -44,7 +58,7 @@ Use any fractal pattern as the full vinyl, just like Picture Discs
 
 ![Library](screenshots/README-library.png)
 
-Only one layer deep. Albums — select one and it plays.
+Only one layer deep. Albums: select one and it plays.
 
 ![Artist](screenshots/README-library-artist.png)
 
@@ -134,6 +148,7 @@ lastfm:
 - Recently played counts an album once a song of it has completed, so mis-taps never land on the shelf; anything there can be removed with its corner x
 - The look is saved (a restart keeps it), and an album can keep a look of its own: switch the vinyl page to "This album" while it plays
 - Frame and panel colours are yours to set; pure black lets a cover with a dark edge sit flush
+- Favorite vinyl styles, so a gallery can show just the ones you like
 - Pygame vinyl visualization with spinning record, needle, and track grooves
 - Web UI for browsing and playback control
 - Vinyl styles: black, colored, clear, picture disc, Mandelbrot fractals, nebulae
@@ -163,10 +178,10 @@ Random per album: black, colored, clear (with platter shimmer + iridescent
 refraction), picture disc, pattern picture disc (fractal as the full
 disc), and three fractal families:
 
-- **Mandelbrot** — classic escape-time fractal at named zooms (seahorse,
+- **Mandelbrot**: classic escape-time fractal at named zooms (seahorse,
   elephant, spiral, etc.) across a dozen color schemes.
-- **Nebula** — value-noise gas clouds in 19 color variants.
-- **Munafo Deep-Zoom** — `2.7×10⁻²²` deep-zoom Mandelbrot renders. The
+- **Nebula**: value-noise gas clouds in 19 color variants.
+- **Munafo Deep-Zoom**: `2.7×10⁻²²` deep-zoom Mandelbrot renders. The
   9000×9000 gold archives + the GPU/perturbation engine that produced
   them live in a separate repo: **[bongsweat](https://github.com/dkoch84/bongsweat)**. The
   vinyl-size cache (`lp/cache/munafo/*.png`, ~14 MB) is committed here
