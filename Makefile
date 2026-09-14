@@ -2,7 +2,7 @@ PY := .venv/bin/python
 RUFF := .venv/bin/ruff
 SRC := lpcore lp lpdeck lpstudio main.py dev_spin.py gen_release_icon.py tests
 
-.PHONY: help check lint test fix run deck shot shot-kiosk gammaray studio prerender
+.PHONY: help check lint test fix run deck shot shot-kiosk gammaray studio prerender video release-assets
 
 check: lint test          ## lint + tests (run before pushing)
 
@@ -34,6 +34,12 @@ prerender:                ## render missing vinyl style images (ONLY=name, FORCE
 shot-kiosk:               ## headless screenshot of the lp kiosk → /tmp/lp.png (ARGS=...)
 	$(PY) -m lp.shot /tmp/lp.png $(ARGS)
 	@echo "wrote /tmp/lp.png"
+
+video:                    ## render an album as the kiosk plays it: ALBUM="/music/Artist/Album" OUT=x.mp4 (ARGS=...)
+	$(PY) -m lp.video "$(ALBUM)" $(OUT) $(ARGS)
+
+release-assets:           ## build what the Release workflow ships, into dist/ (TAG=name)
+	$(PY) -m lp.release --tag $(TAG) --out dist
 
 gammaray:                 ## inspect a running lp-deck live (needs gammaray installed)
 	gammaray $(PY) -m lpdeck

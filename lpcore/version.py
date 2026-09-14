@@ -2,8 +2,10 @@
 
 The canonical release name is the most recent annotated/lightweight tag (lp
 ships named releases like ``crucible-and-ruin``). We derive it from git so a deploy
-box reports exactly what it has checked out, falling back to RELEASE_NAME when
-git isn't available (e.g. a tarball deploy).
+box reports exactly what it has checked out. A release tarball (built by
+``lp.release`` and installed by ``lp.update``) has no git metadata, so it carries
+a ``RELEASE`` file at its root naming the tag; RELEASE_NAME is the last resort
+when neither exists.
 """
 import functools
 import os
@@ -19,6 +21,17 @@ RELEASE_TITLES = {
 }
 
 _REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RELEASE_FILE = os.path.join(_REPO_DIR, 'RELEASE')
+
+
+def _stamped_release():
+    """The tag named by the RELEASE file a release tarball ships with, or None."""
+    try:
+        with open(RELEASE_FILE) as f:
+            name = f.read().strip()
+    except OSError:
+        return None
+    return name or None
 
 
 def _git(*args):
@@ -43,8 +56,14 @@ def get_version():
     ``commit``   — short commit sha, when available.
     ``title``    — how the release reads, e.g. ``Crucible & Ruin``.
     """
-    release = _git('describe', '--tags', '--abbrev=0') or RELEASE_NAME
-    describe = _git('describe', '--tags', '--always', '--dirty') or release
-    commit = _git('rev-parse', '--short', 'HEAD')
+    stamped = _stamped_release()
+    release = stamped or _git('describe', '--tags', '--abbrev=0') or RELEASE_NAME
+    describe = stamped or _git('describe', '--tags', '--always', '--dirty') or release
+    commit = None if stamped else _git('rev-parse', '--short', 'HEAD')
     return {'release': release, 'describe': describe, 'commit': commit,
-            'title': RELEASE_TITLES.get(release, release)}
+            'title': release_title(release)}
+
+
+def release_title(tag):
+    """How a tag reads to people: ``crucible-and-ruin`` is ``Crucible & Ruin``."""
+    return RELEASE_TITLES.get(tag, tag)

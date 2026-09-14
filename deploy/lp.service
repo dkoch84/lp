@@ -1,23 +1,32 @@
 [Unit]
-Description=lp - Album Music Player
-After=network-online.target
-Wants=network-online.target
+Description=lp: the album kiosk
+# A user unit: no root anywhere in the loop. The updater (lp.update) relaunches
+# the app in place after switching ~/lp/current, and Restart=always covers a
+# crash. The user's pipewire socket exists at boot only with lingering enabled:
+#   sudo loginctl enable-linger <user>
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
 
 [Service]
 Type=simple
-User=daniel
-WorkingDirectory=/home/daniel/lp
-ExecStart=/home/daniel/lp/venv/bin/python main.py -c /home/daniel/.config/lp/config.yml
+WorkingDirectory=%h/lp/current
+ExecStart=%h/lp/venv/bin/python %h/lp/current/main.py -c %h/.config/lp/config.yml --no-open
 Restart=always
-RestartSec=10
+RestartSec=5
 
-# SDL direct rendering without X
-Environment="SDL_VIDEODRIVER=kmsdrm"
+# The release-install layout (see lp/update.py): code under releases/<tag>,
+# everything that must survive an update beside it.
+Environment=LP_HOME=%h/lp
+Environment=LP_CACHE_DIR=%h/lp/cache
+Environment=LP_DATA_DIR=%h/lp/data
 
-# Logging
+# SDL direct rendering without X (a screen wired to the board, no desktop).
+# Remove this line to run the kiosk inside a desktop session instead.
+Environment=SDL_VIDEODRIVER=kmsdrm
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=lp
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

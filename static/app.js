@@ -10,6 +10,11 @@ const nowPlaying = $('#now-playing');
 const npTrack = $('#np-track');
 const npArtistAlbum = $('#np-artist-album');
 const npStop = $('#np-stop');
+const npQueue = $('#np-queue');
+const playSheet = $('#play-sheet');
+const playSheetTitle = $('#play-sheet-title');
+const queueSheet = $('#queue-sheet');
+const queueSheetList = $('#queue-sheet-list');
 const vinylBtn = $('#vinyl-btn');
 const shareBtn = $('#share-btn');
 const artistControls = $('#artist-controls');
@@ -168,12 +173,27 @@ function renderRecent() {
         <div class="album-title">${esc(a.name)}</div>
         <div class="album-year">${esc(a.artist)}</div>
       </div>
+      <button class="recent-remove" aria-label="Remove from recently played" title="Remove from recently played">&times;</button>
     `;
     tile.addEventListener('click', () => playAlbum(a.artist, a.folder));
     attachCaptionPicker(tile, () => goToTracks(a.artist, a.folder));
+    tile.querySelector('.recent-remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeRecent(a.artist, a.folder);
+    });
     recentGrid.appendChild(tile);
   }
   recentSection.classList.remove('hidden');
+}
+
+async function removeRecent(artist, folder) {
+  try {
+    await api(`/api/recent/${encodeURIComponent(artist)}/${encodeURIComponent(folder)}`,
+              {method: 'DELETE'});
+  } catch {
+    // already gone, or the server is away: the reload below shows the truth
+  }
+  await loadRecent();
 }
 
 async function loadRecent() {
@@ -377,9 +397,31 @@ albumGridSelectBtn.addEventListener('click', async () => {
 });
 
 // --- Play ---
+//
+// A record that is on does not get cut off by a stray tap: when something is
+// playing, the tap opens a sheet first. "Play now" is the old behaviour,
+// "Play next" lines the album up for when this one ends (server-side queue,
+// see lp/queue.py), and anything else leaves the record spinning.
 
 async function playAlbum(artistName, folder, start = 0) {
   const info = await api(`/api/albums/${encodeURIComponent(artistName)}/${encodeURIComponent(folder)}/tracks`);
+  const playing = lastStatus && lastStatus.playing;
+  const sameAlbum = playing && lastStatus.artist === artistName &&
+    lastStatus.album === albumNameFor(artistName, folder);
+  if (playing && !(sameAlbum && start > 0)) {
+    // Picking a track of the album already on is a seek, not a takeover.
+    const choice = await confirmPlay(albumNameFor(artistName, folder), start === 0);
+    if (choice === 'next') {
+      await api('/api/queue', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({path: info.path}),
+      });
+      pollStatus();
+      return;
+    }
+    if (choice !== 'now') return;
+  }
   await api('/api/play', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -475,10 +517,98 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !trackSheet.classList.contains('hidden')) closeTrackSheet();
 });
 
+// --- Play confirmation sheet ---
+
+let playSheetResolve = null;
+
+function confirmPlay(albumName, canQueue) {
+  const onNow = lastStatus ? [lastStatus.artist, lastStatus.album].filter(Boolean).join(' \u00b7 ') : '';
+  playSheetTitle.innerHTML =
+    `<strong>${esc(onNow)}</strong> is on. Play <strong>${esc(albumName)}</strong>?`;
+  $('#play-sheet-next').classList.toggle('hidden', !canQueue);
+  playSheet.classList.remove('hidden');
+  return new Promise((resolve) => { playSheetResolve = resolve; });
+}
+
+function settlePlaySheet(choice) {
+  playSheet.classList.add('hidden');
+  const resolve = playSheetResolve;
+  playSheetResolve = null;
+  if (resolve) resolve(choice);
+}
+
+$('#play-sheet-now').addEventListener('click', () => settlePlaySheet('now'));
+$('#play-sheet-next').addEventListener('click', () => settlePlaySheet('next'));
+$('#play-sheet-cancel').addEventListener('click', () => settlePlaySheet('cancel'));
+$('#play-sheet-backdrop').addEventListener('click', () => settlePlaySheet('cancel'));
+
+// --- Queue sheet ---
+
+function renderQueueSummary(q) {
+  if (!q || !q.count) {
+    npQueue.classList.add('hidden');
+    npQueue.textContent = '';
+    return;
+  }
+  const more = q.count > 1 ? ` (+${q.count - 1} more)` : '';
+  npQueue.textContent = `Next: ${q.next.name}${more}`;
+  npQueue.classList.remove('hidden');
+}
+
+async function renderQueueSheet() {
+  let items = [];
+  try {
+    items = await api('/api/queue');
+  } catch {
+    items = [];
+  }
+  queueSheetList.innerHTML = '';
+  if (items.length === 0) {
+    queueSheetList.innerHTML = '<li id="queue-sheet-empty">Nothing queued.</li>';
+  }
+  items.forEach((a, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="track-sheet-no">${i + 1}</span>` +
+      `<span class="queue-name">${esc(a.name)} <span class="queue-artist">${esc(a.artist)}</span></span>` +
+      `<button class="queue-remove" aria-label="Remove from queue">&times;</button>`;
+    li.querySelector('.queue-remove').addEventListener('click', async () => {
+      try {
+        await api(`/api/queue/${a.index}`, {method: 'DELETE'});
+      } catch {
+        // gone already; the re-render shows the truth
+      }
+      await renderQueueSheet();
+      pollStatus();
+    });
+    queueSheetList.appendChild(li);
+  });
+  queueSheet.classList.remove('hidden');
+}
+
+function closeQueueSheet() {
+  queueSheet.classList.add('hidden');
+}
+
+npQueue.addEventListener('click', renderQueueSheet);
+$('#queue-sheet-close').addEventListener('click', closeQueueSheet);
+$('#queue-sheet-backdrop').addEventListener('click', closeQueueSheet);
+$('#queue-sheet-clear').addEventListener('click', async () => {
+  await api('/api/queue/clear', {method: 'POST'});
+  closeQueueSheet();
+  pollStatus();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!playSheet.classList.contains('hidden')) settlePlaySheet('cancel');
+  if (!queueSheet.classList.contains('hidden')) closeQueueSheet();
+});
+
 // --- Stop ---
 
 npStop.addEventListener('click', async () => {
   await api('/api/stop', {method: 'POST'});
+  pollStatus();
 });
 
 // --- Back ---
@@ -498,9 +628,11 @@ async function pollStatus() {
     if (s.playing) {
       nowPlaying.classList.remove('hidden');
       npTrack.textContent = s.track_title || `Track ${s.track_number}`;
-      npArtistAlbum.textContent = [s.artist, s.album].filter(Boolean).join(' \u2014 ');
+      npArtistAlbum.textContent = [s.artist, s.album].filter(Boolean).join(' \u00b7 ');
+      renderQueueSummary(s.queue);
     } else {
       nowPlaying.classList.add('hidden');
+      renderQueueSummary(null);
     }
   } catch {
     // ignore transient errors
@@ -524,6 +656,97 @@ async function loadVersion() {
     brandRelease.textContent = '';  // leave the lp wordmark, drop the release tag
   }
 }
+
+// --- Updates ---
+//
+// Only a release install (lp.update: ~/lp/current -> releases/<tag>) is
+// "managed"; a git checkout hides the bar entirely. The bar is one line: what
+// is installed, whether something newer exists, and the buttons that apply.
+
+const updateBar = document.getElementById('update-bar');
+const updateText = document.getElementById('update-text');
+const updateCheck = document.getElementById('update-check');
+const updateIdle = document.getElementById('update-idle');
+const updateNow = document.getElementById('update-now');
+const updateCancel = document.getElementById('update-cancel');
+let updateRestarting = false;
+
+function ago(ts) {
+  if (!ts) return 'never';
+  const mins = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} days ago`;
+}
+
+function renderUpdate(u) {
+  if (!u || !u.managed) {
+    updateBar.classList.add('hidden');
+    return;
+  }
+  updateBar.classList.remove('hidden');
+  updateBar.classList.toggle('available', !!u.available && u.state !== 'error');
+  updateBar.classList.toggle('error', u.state === 'error');
+  const busy = u.state === 'checking' || u.state === 'installing';
+  updateCheck.disabled = busy;
+  const show = (el, on) => el.classList.toggle('hidden', !on);
+  show(updateIdle, !!u.available && !busy && !u.pending);
+  show(updateNow, !!u.available && !busy && u.pending !== 'now');
+  show(updateCancel, !!u.pending && u.state !== 'installing');
+  show(updateCheck, !u.available && !u.pending);
+
+  const current = u.current || 'unknown release';
+  const latest = u.latest_title || u.latest;
+  let text;
+  if (u.state === 'installing') {
+    const p = u.progress || {};
+    const pct = p.total ? ` ${Math.floor(p.done * 100 / p.total)}%` : '';
+    text = `${p.phase || 'installing'} ${p.asset || ''}${pct}`.trim();
+  } else if (u.state === 'error') {
+    text = `Update failed: ${u.error}`;
+  } else if (u.state === 'checking') {
+    text = 'Checking for a new release…';
+  } else if (u.pending === 'idle' && u.installed) {
+    text = `${latest} is ready; restarting after this album`;
+  } else if (u.pending === 'now' && u.installed) {
+    text = `Restarting into ${latest}…`;
+  } else if (u.available) {
+    text = `${latest} is out (you have ${current})`;
+  } else if (u.checked_at) {
+    text = `${current} is the latest release · checked ${ago(u.checked_at)}`;
+  } else {
+    text = `${current} · not checked yet`;
+  }
+  updateText.textContent = text;
+  if (u.pending === 'now' && u.installed) updateRestarting = true;
+}
+
+async function loadUpdate() {
+  try {
+    renderUpdate(await api('/api/update'));
+    updateRestarting = false;
+  } catch {
+    if (updateRestarting) updateText.textContent = 'Restarting…';
+  }
+}
+
+async function updateAction(path, body) {
+  try {
+    renderUpdate(await api(path, {
+      method: 'POST',
+      headers: body ? {'Content-Type': 'application/json'} : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    }));
+  } catch (e) {
+    updateText.textContent = `Update request failed (${e.message})`;
+  }
+}
+
+updateCheck.addEventListener('click', () => updateAction('/api/update/check'));
+updateIdle.addEventListener('click', () => updateAction('/api/update/install', {when: 'idle'}));
+updateNow.addEventListener('click', () => updateAction('/api/update/install', {when: 'now'}));
+updateCancel.addEventListener('click', () => updateAction('/api/update/install', {when: 'cancel'}));
 
 // --- Routing ---
 //
@@ -633,3 +856,4 @@ startRouter();
 loadVersion();
 statusInterval = setInterval(pollStatus, 3000);
 pollStatus();
+loadUpdate();

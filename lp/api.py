@@ -1,4 +1,6 @@
 import os
+import threading
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -6,6 +8,7 @@ from pydantic import BaseModel
 
 from lpcore.vinyl.settings import VinylSettings
 from lpcore.vinyl.catalog import LABEL_TEXT_MODES, LABEL_TEXT_FONTS, DECOR_EMOJI
+from lp.queue import AlbumQueue
 
 
 class PlayRequest(BaseModel):
@@ -58,8 +61,16 @@ class GridRequest(BaseModel):
     folders: list[str]
 
 
+class QueueRequest(BaseModel):
+    path: str
+
+
+class UpdateInstallRequest(BaseModel):
+    when: str = 'idle'      # now | idle (after the album ends) | cancel
+
+
 def create_app(player, library, static_dir, scrobbler=None, display=None,
-               state=None, settings=None):
+               state=None, settings=None, updates=None):
     app = FastAPI(title="lp")
     if settings is None:
         settings = VinylSettings()
@@ -137,6 +148,12 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
             })
         return out
 
+    @app.delete("/api/recent/{artist}/{folder}")
+    def remove_recent(artist: str, folder: str):
+        if not state or not state.remove_recent_album(artist, folder):
+            raise HTTPException(404, "Not in recently played")
+        return {"removed": True}
+
     @app.post("/api/artists/{name}/grid")
     def set_grid_covers(name: str, req: GridRequest):
         if not state:
@@ -210,6 +227,41 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     # --- Playback ---
 
+    # Recently played means a song finished, not that play was pressed: a
+    # mis-tap on the grid should not sit on the shelf for a week. /api/play
+    # notes what went on; the first track boundary (or the end of a one-track
+    # album) is what records it. Stopping before then records nothing.
+    pending = {}
+    pending_lock = threading.Lock()
+
+    def _note_pending(artist, folder):
+        with pending_lock:
+            pending.clear()
+            pending.update(artist=artist, folder=folder)
+
+    def _record_pending():
+        with pending_lock:
+            entry = dict(pending)
+            pending.clear()
+        if entry and state:
+            state.mark_played(entry['artist'])
+            state.mark_album_played(entry['artist'], entry['folder'])
+
+    def _drop_pending():
+        with pending_lock:
+            pending.clear()
+
+    if state and hasattr(player, 'on'):        # test stubs may not carry events
+        player.on('track_change', _record_pending)
+        player.on('album_end', _record_pending)
+        player.on('stop', _drop_pending)
+
+    # Albums lined up for after this one. Registers its own album_end handler
+    # AFTER the recent-shelf one above, so the ending album is recorded before
+    # the next one is noted as pending.
+    queue = AlbumQueue(player, library,
+                       on_play=lambda album: _note_pending(album.artist, album.folder_name))
+
     @app.post("/api/play")
     def play(req: PlayRequest):
         album = library.get_album_by_path(req.path)
@@ -224,19 +276,45 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
             if not 0 <= req.start < count:
                 raise HTTPException(400, f"start out of range (0..{count - 1})")
         player.play_album(req.path, start=req.start)
-        if state:
-            state.mark_played(album.artist)
-            state.mark_album_played(album.artist, album.folder_name)
+        _note_pending(album.artist, album.folder_name)
         return {"status": "playing", "album": album.display_name}
 
     @app.post("/api/stop")
     def stop():
         player.stop()
+        queue.clear()           # the player fires 'stop' too; explicit for stubs
         return {"status": "stopped"}
+
+    # --- Queue ---
+
+    @app.get("/api/queue")
+    def list_queue():
+        return queue.items()
+
+    @app.post("/api/queue")
+    def add_to_queue(req: QueueRequest):
+        try:
+            result = queue.add(req.path)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"status": result, "queue": queue.items()}
+
+    @app.delete("/api/queue/{index}")
+    def remove_from_queue(index: int):
+        if not queue.remove(index):
+            raise HTTPException(404, "Nothing queued at that position")
+        return {"queue": queue.items()}
+
+    @app.post("/api/queue/clear")
+    def clear_queue():
+        queue.clear()
+        return {"queue": []}
 
     @app.get("/api/status")
     def status():
-        return player.get_status()
+        s = dict(player.get_status())
+        s["queue"] = queue.summary()
+        return s
 
     @app.get("/api/version")
     def version():
@@ -532,6 +610,31 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
             raise HTTPException(400, "Scrobbler not initialized")
         scrobbler.enabled = req.enabled
         return scrobbler.get_status()
+
+    # --- Updates ---
+    # A release install (lp.update) can fetch and switch to a new release from
+    # here; a git checkout reports managed=false and the UI shows nothing.
+
+    @app.get("/api/update")
+    def update_status():
+        if updates is None:
+            return {"managed": False}
+        return updates.status()
+
+    @app.post("/api/update/check")
+    def update_check():
+        if updates is None or not updates.managed:
+            raise HTTPException(400, "this install is not managed by the updater")
+        return updates.check()
+
+    @app.post("/api/update/install")
+    def update_install(req: UpdateInstallRequest):
+        if updates is None or not updates.managed:
+            raise HTTPException(400, "this install is not managed by the updater")
+        try:
+            return updates.install(req.when)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     # --- Thumbnail prewarm ---
     # Warm the album-art thumbnail cache in the background so the very first

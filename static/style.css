@@ -4,13 +4,17 @@
   box-sizing: border-box;
 }
 
+/* The page is exactly the viewport: header and footer stay put, and only
+   <main> scrolls. With min-height instead, a long grid grew the page and Stop
+   ended up below the fold. */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: #111;
   color: #eee;
-  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 header {
@@ -112,6 +116,7 @@ header h1 {
 
 main {
   flex: 1;
+  min-height: 0;          /* lets a flex child shrink below its content and scroll */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -354,6 +359,31 @@ main {
   opacity: 0.8;
 }
 
+/* Recently played only: a corner "x" that takes the album off the shelf.
+   Big enough for a thumb, dim until the tile is touched or hovered. */
+.recent-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #eee;
+  font-size: 1.2rem;
+  line-height: 32px;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.album-tile:hover .recent-remove,
+.album-tile:active .recent-remove,
+.recent-remove:focus-visible {
+  opacity: 1;
+}
+
 .album-cover {
   width: 100%;
   aspect-ratio: 1;
@@ -386,12 +416,74 @@ main {
   font-size: 0.8rem;
 }
 
+/* Update bar: only on a release install (see lp.update); hidden on a checkout */
+#update-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 20px;
+  background: #151515;
+  border-top: 1px solid #2a2a2a;
+  font-size: 0.8rem;
+  color: #999;
+  flex-shrink: 0;
+}
+
+#update-bar.available {
+  color: #eee;
+  background: #1c2a24;
+  border-top-color: #2f5e48;
+}
+
+#update-bar.error {
+  color: #e8a0a0;
+}
+
+#update-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#update-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#update-actions button {
+  background: #2a2a2a;
+  border: none;
+  color: #ddd;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+#update-actions button:active {
+  background: #3a3a3a;
+}
+
+#update-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#update-bar.available #update-now,
+#update-bar.available #update-idle {
+  background: #2f5e48;
+  color: #fff;
+}
+
 /* Now playing footer */
 #now-playing {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  padding: 12px 20px max(12px, env(safe-area-inset-bottom));
   background: #1a1a1a;
   border-top: 1px solid #333;
   flex-shrink: 0;
@@ -414,6 +506,20 @@ main {
 #np-artist-album {
   font-size: 0.8rem;
   color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "Next: <album>" under the track line; tapping opens the queue sheet */
+#np-queue {
+  background: none;
+  border: none;
+  padding: 2px 0 0;
+  text-align: left;
+  color: #8ab89f;
+  font-size: 0.8rem;
+  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -479,6 +585,122 @@ main {
 #brand:hover #brand-release {
   color: #0b1416;
   background: #52a89b;
+}
+
+/* Play-confirmation and queue sheets: same bottom-sheet shape as the picker */
+#play-sheet, #queue-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+#play-sheet-backdrop, #queue-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+#play-sheet-content, #queue-sheet-content {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  max-height: 76vh;
+  display: flex;
+  flex-direction: column;
+  background: #161616;
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.6);
+  padding: 16px 18px max(16px, env(safe-area-inset-bottom));
+  gap: 12px;
+}
+
+#play-sheet-title, #queue-sheet-title {
+  font-size: 0.95rem;
+  color: #bbb;
+  line-height: 1.4;
+}
+
+#play-sheet-title strong {
+  color: #fff;
+}
+
+#play-sheet-buttons, #queue-sheet-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#play-sheet-buttons button, #queue-sheet-buttons button {
+  border: none;
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 1rem;
+  background: #2a2a2a;
+  color: #eee;
+  cursor: pointer;
+}
+
+#play-sheet-buttons button:active, #queue-sheet-buttons button:active {
+  background: #3a3a3a;
+}
+
+#play-sheet-now {
+  background: #2f5e48 !important;
+  color: #fff;
+}
+
+#play-sheet-buttons .sheet-cancel, #queue-sheet-buttons .sheet-cancel {
+  background: none;
+  color: #888;
+}
+
+#queue-sheet-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+#queue-sheet-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  color: #e6e6e6;
+  border-bottom: 1px solid #262626;
+}
+
+#queue-sheet-list .queue-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#queue-sheet-list .queue-artist {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+#queue-sheet-list .queue-remove {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: #2a2a2a;
+  color: #eee;
+  font-size: 1.1rem;
+  cursor: pointer;
+  flex: none;
+}
+
+#queue-sheet-empty {
+  color: #666;
+  padding: 8px 0;
 }
 
 #track-sheet {

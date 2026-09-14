@@ -70,7 +70,36 @@ Get into the right headspace.
 
 \m/
 
-## Setup
+## Install
+
+For a kiosk or a desktop that should just work, install from the latest release
+and let it keep itself updated:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dkoch84/lp/master/deploy/install.sh | bash -s -- --music /path/to/music
+```
+
+lp then checks GitHub for the next release every few hours and switches to it
+once the album you are playing has finished; the web UI has **Check now** and
+**Install now** too. Nothing runs as root. Details, the kiosk service, and the
+release layout are in [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md).
+
+## The album as a video
+
+```bash
+make video ALBUM="/music/Howling Giant/2025 - Crucible & Ruin" OUT=crucible.mp4
+```
+
+Renders the whole album exactly as the kiosk plays it, vinyl spinning and the
+needle tracking through the grooves, to a 1080p HEVC MP4 with the album's audio
+joined gapless. Beside it lands a `.txt` with the YouTube description: a
+timestamp per track, which YouTube turns into chapters. A free whole-album
+visualizer for any band. `--preview 20` renders the first twenty seconds to
+check the look; `--style`, `--effects` and the rest take the same values the
+web picker does; `--codec h264` for players without HEVC. lp-deck has the same
+thing as a **Video…** button on every album page. Needs ffmpeg.
+
+## Setup (from a checkout)
 
 ```bash
 python -m venv .venv
@@ -99,6 +128,8 @@ lastfm:
 ## Features
 
 - Album playback via libVLC
+- A record that is on is not cut off by a stray tap: the web UI asks, and "Play next" queues the album for when this one ends
+- Recently played counts an album once a song of it has completed, so mis-taps never land on the shelf; anything there can be removed with its corner x
 - Pygame vinyl visualization with spinning record, needle, and track grooves
 - Web UI for browsing and playback control
 - Vinyl styles: black, colored, clear, picture disc, Mandelbrot fractals, nebulae

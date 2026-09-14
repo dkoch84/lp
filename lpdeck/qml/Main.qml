@@ -1208,6 +1208,20 @@ ApplicationWindow {
                                     songPg.songs.map(function(s){ return s.path }))
                             }
                         }
+                        Rectangle {
+                            // The kiosk's party trick as a file: the whole album,
+                            // vinyl spinning, needle tracking, chapters for YouTube.
+                            visible: songPg.isAlbum
+                            implicitWidth: 116; implicitHeight: 38; radius: 19
+                            color: vbtn.hovered ? theme.surfaceHover : theme.surface
+                            border.width: 1; border.color: theme.line
+                            Label { anchors.centerIn: parent; text: "🎬  Video…"
+                                    color: theme.text; font.pixelSize: 13 }
+                            HoverHandler { id: vbtn }
+                            TapHandler {
+                                onTapped: videoDialog.openFor(songPg.albumId, songPg.headerTitle)
+                            }
+                        }
                     }
                 }
                 Item { Layout.fillWidth: true }
@@ -2369,6 +2383,23 @@ ApplicationWindow {
             else if (kind === "queue") controller.exportQueue(selectedFile)
             else controller.exportPlaylist(itemId, selectedFile)
         }
+    }
+
+    FileDialog {
+        id: videoDialog
+        property int albumId: -1
+        function openFor(id, name) {
+            albumId = id
+            var safe = (name || "Album").replace(/[\/\\:*?"<>|]/g, "_")
+            selectedFile = controller.exportFolder + "/" + encodeURIComponent(safe) + ".mp4"
+            open()
+        }
+        title: "Render the album as a video"
+        fileMode: FileDialog.SaveFile
+        currentFolder: controller.exportFolder
+        defaultSuffix: "mp4"
+        nameFilters: ["MP4 video (*.mp4)"]
+        onAccepted: controller.exportAlbumVideo(albumId, selectedFile)
     }
 
     // ---- smart playlist actions ----

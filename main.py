@@ -15,6 +15,8 @@ from lp.api import create_app
 from lp.state import UserState
 from lp.launch import resolve_port, lan_ip
 from lpcore.vinyl.settings import VinylSettings
+from lpcore.paths import data_file
+from lp.update import UpdateManager
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,7 +54,7 @@ def main():
     api_config = config.get('api', {})
     host = api_config.get('host', '0.0.0.0')
 
-    launch_store = os.path.join(HERE, '.lp_launch.json')
+    launch_store = data_file('.lp_launch.json')
     port, source = resolve_port(args.port, launch_store, host=host,
                                 save=not args.no_save, config_port=api_config.get('port'))
 
@@ -83,20 +85,24 @@ def main():
     library = Library(music_path)
     lastfm_config = config.get('lastfm', {})
     scrobbler = Scrobbler(player, lastfm_config)
-    state_path = os.path.join(HERE, '.lp_state.json')
+    state_path = data_file('.lp_state.json')
     state = UserState(state_path)
     # Shared vinyl display config: the web API mutates it, the display reads it.
     settings = VinylSettings()
+    # Self-update: only active on a release install (~/lp/current -> releases/<tag>);
+    # a git checkout reports itself unmanaged and the web UI hides the controls.
+    updates = UpdateManager(config.get('updates', {}), player)
+    updates.start()
 
     if args.no_display:
         app = create_app(player, library, static_dir, scrobbler, state=state,
-                         settings=settings)
+                         settings=settings, updates=updates)
         uvicorn.run(app, host=host, port=port, log_level="info")
     else:
         from lp.display import Display
         display = Display(config, player, port, settings=settings)
         app = create_app(player, library, static_dir, scrobbler, display, state,
-                         settings=settings)
+                         settings=settings, updates=updates)
         api_thread = threading.Thread(
             target=uvicorn.run,
             args=(app,),

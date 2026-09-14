@@ -41,13 +41,50 @@
     <div id="album-grid" class="tile-grid view hidden"></div>
   </main>
 
+  <div id="update-bar" class="hidden" role="status">
+    <div id="update-text"></div>
+    <div id="update-actions">
+      <button id="update-check">Check now</button>
+      <button id="update-idle" class="hidden">After this album</button>
+      <button id="update-now" class="hidden">Install now</button>
+      <button id="update-cancel" class="hidden">Don't restart</button>
+    </div>
+  </div>
+
   <footer id="now-playing" class="hidden">
     <div id="np-info">
       <span id="np-track"></span>
       <span id="np-artist-album"></span>
+      <button id="np-queue" class="hidden"></button>
     </div>
     <button id="np-stop">Stop</button>
   </footer>
+
+  <!-- Asked before a tap cuts off the record that is on -->
+  <div id="play-sheet" class="hidden" role="dialog" aria-modal="true">
+    <div id="play-sheet-backdrop"></div>
+    <div id="play-sheet-content">
+      <div id="play-sheet-title"></div>
+      <div id="play-sheet-buttons">
+        <button id="play-sheet-now">Play now</button>
+        <button id="play-sheet-next">Play next</button>
+        <button id="play-sheet-cancel" class="sheet-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- What is lined up after this record -->
+  <div id="queue-sheet" class="hidden" role="dialog" aria-modal="true">
+    <div id="queue-sheet-backdrop"></div>
+    <div id="queue-sheet-content">
+      <div id="queue-sheet-title">Up next</div>
+      <ol id="queue-sheet-list"></ol>
+      <div id="queue-sheet-buttons">
+        <button id="queue-sheet-clear">Clear queue</button>
+        <button id="queue-sheet-close" class="sheet-cancel">Close</button>
+      </div>
+    </div>
+  </div>
 
   <div id="share-modal" class="hidden" role="dialog" aria-modal="true">
     <div id="share-modal-backdrop"></div>

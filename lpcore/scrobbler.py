@@ -3,6 +3,8 @@ import os
 import time
 import threading
 
+from lpcore.paths import data_file
+
 try:
     import pylast
 except ImportError:
@@ -33,13 +35,9 @@ class Scrobbler:
         self._lock = threading.Lock()
 
         # Session key persistence
-        self._session_key_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), '..', '.lastfm_session'
-        )
+        self._session_key_path = data_file('.lastfm_session')
         # Scrobbles that couldn't be sent (offline, Last.fm down), kept to retry.
-        self._queue_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), '..', '.lastfm_queue.json'
-        )
+        self._queue_path = data_file('.lastfm_queue.json')
         self._queue_lock = threading.Lock()
 
         self._restore_session()

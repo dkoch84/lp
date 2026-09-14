@@ -9,6 +9,7 @@ state to QML. lpcore/db/player/indexer are untouched.
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -330,6 +331,7 @@ class Controller(QObject):
     scanChanged = Signal()               # scanning state / status text
     _scanProgress = Signal(int, int, int)    # indexer thread → GUI thread
     _scanDone = Signal(str)
+    _videoNotice = Signal(str)               # lp.video subprocess thread → GUI thread
     noticeChanged = Signal()             # a short message for the user (skipped track, …)
     raiseRequested = Signal()            # bring the window forward (desktop media controls)
     externalCommand = Signal(str, str)   # requests from other threads (MPRIS), run on the GUI thread
@@ -419,6 +421,7 @@ class Controller(QObject):
         self._fill_while_scanning = False
         self._scanProgress.connect(self._on_scan_progress)
         self._scanDone.connect(self._on_scan_done)
+        self._videoNotice.connect(self._set_notice)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._on_library_dir_changed)
         self._watch_queue = []
@@ -1349,6 +1352,62 @@ class Controller(QObject):
     @Slot("QVariant", result=bool)
     def exportQueue(self, file_url):
         return self._write_playlist_file(file_url, "Queue", list(self.player.queue))
+
+    # --- album video (lp.video) ---
+
+    @Slot(int, "QVariant", result=bool)
+    def exportAlbumVideo(self, album_id, file_url):
+        """Render the album as the kiosk would play it, to an .mp4 (plus the
+        YouTube description with chapter timestamps beside it). Runs lp.video
+        in a subprocess so a 45-minute render never touches the UI thread; its
+        progress lines become notices. The vinyl look is the one this album
+        gets in the deck (album > artist > global override)."""
+        row = self.con.execute(
+            "SELECT al.path, al.name, al.artist_id, ar.name AS artist FROM albums al "
+            "JOIN artists ar ON ar.id=al.artist_id WHERE al.id=?", (album_id,)).fetchone()
+        if not row:
+            return False
+        if not shutil.which("ffmpeg"):
+            self._set_notice("Can't render a video: ffmpeg is not installed.")
+            return False
+        out = _local_file(file_url)
+        if not out.lower().endswith(".mp4"):
+            out += ".mp4"
+        settings = VinylSettings.from_dict(
+            db.resolve_vinyl_settings(self.con, album_id=album_id, artist_id=row["artist_id"]))
+        cmd = [sys.executable, "-m", "lp.video", row["path"], out,
+               "--style", settings.style, "--label", settings.label,
+               "--label-text", settings.label_text, "--grooves", settings.grooves]
+        if settings.effects:
+            cmd += ["--effects", ",".join(settings.effects)]
+        name = f"{row['artist']} - {row['name']}"
+        self._set_notice(f"Rendering \u201c{name}\u201d to {os.path.basename(out)}\u2026")
+        threading.Thread(target=self._run_video_export, args=(cmd, name, out),
+                         daemon=True).start()
+        return True
+
+    def _run_video_export(self, cmd, name, out):
+        env = dict(os.environ, PYTHONPATH=os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))))
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, env=env)
+        except OSError as e:
+            self._videoNotice.emit(f"Couldn't start the render: {e}")
+            return
+        last = ""
+        for line in proc.stdout:
+            line = line.strip()
+            if " to go" in line or "frames at" in line:
+                self._videoNotice.emit(f"{name}: {line}")
+            if line:
+                last = line
+        code = proc.wait()
+        if code:
+            self._videoNotice.emit(f"Video render failed: {last or f'exit {code}'}")
+        else:
+            self._videoNotice.emit(f"Saved \u201c{name}\u201d to {os.path.basename(out)}; "
+                                   "the YouTube description with chapters is beside it.")
 
     @Property(str, constant=True)
     def exportFolder(self):

@@ -67,8 +67,9 @@ def _first_tag(tags, key):
     return str(values[0])
 
 
-def _album_info(folder):
-    """([{title, artist, album, date, length}], cover path) for a real album folder."""
+def album_info(folder):
+    """([{title, artist, album, date, length, path}], cover path) for a real album
+    folder. Shared with lp.video, which walks the same tracks in time."""
     from mutagen import File as MutagenFile
 
     from lpcore.covers import find_cover
@@ -84,10 +85,47 @@ def _album_info(folder):
             'album': _first_tag(tags, 'album'),
             'date': _first_tag(tags, 'date'),
             'length': float(f.info.length) if f is not None else 0.0,
+            'path': path,
         })
     if not tracks:
         raise SystemExit(f'no audio files in {folder}')
     return tracks, find_cover(folder)
+
+
+def headless_display(width, height, settings, art, album_dir, title='lp-shot'):
+    """A Display with a hidden window and a software renderer, ready for
+    ``_render_playing``; ``renderer.to_surface()`` reads frames back."""
+    config = {'display': {'width': width, 'height': height, 'fullscreen': False}}
+    # A non-empty album path is required: VinylRenderer.get_vinyl_style()
+    # resolves no style for a falsy path and the disc silently renders black.
+    display = Display(config, _FakePlayer(art, album_dir or '/lp-shot/album'), port=0,
+                      settings=settings)
+    display.window = sdl2_video.Window(title, size=(width, height), hidden=True)
+    display.renderer = sdl2_video.Renderer(display.window, accelerated=0)
+    display.renderer.logical_size = (width, height)
+    display._load_fonts()
+    display._build_needle_texture()
+    return display
+
+
+def add_look_arguments(ap):
+    """The vinyl-look options shot and video share, as the web picker sends them."""
+    ap.add_argument('--style', default=VinylSettings.style,
+                    help='vinyl style id, as the web picker sends (e.g. nebula-marble)')
+    ap.add_argument('--label', default=VinylSettings.label,
+                    help='label id (e.g. art, label-white, color-cyan)')
+    ap.add_argument('--label-text', default=VinylSettings.label_text,
+                    help='artist and album on the label: none, curved, straight or blocky')
+    ap.add_argument('--effects', default='',
+                    help='comma-separated Vinyl Effects (e.g. glass,rim-light)')
+    ap.add_argument('--grooves', default='auto',
+                    help='groove treatment: auto, shine, shadow or smooth')
+
+
+def settings_from_args(args):
+    return VinylSettings(style=args.style, label=args.label,
+                         label_text=args.label_text).update(
+        effects=[e for e in args.effects.split(',') if e], grooves=args.grooves)
 
 
 def main(argv=None):
@@ -106,16 +144,7 @@ def main(argv=None):
                     help="a real album folder: its tags, track lengths and cover")
     ap.add_argument('--elapsed', type=float, default=None,
                     help='fraction of the album played, for needle position')
-    ap.add_argument('--style', default=VinylSettings.style,
-                    help='vinyl style id, as the web picker sends (e.g. nebula-marble)')
-    ap.add_argument('--label', default=VinylSettings.label,
-                    help='label id (e.g. art, label-white, color-cyan)')
-    ap.add_argument('--label-text', default=VinylSettings.label_text,
-                    help='artist and album on the label: none, curved, straight or blocky')
-    ap.add_argument('--effects', default='',
-                    help='comma-separated Vinyl Effects (e.g. glass,rim-light)')
-    ap.add_argument('--grooves', default='auto',
-                    help='groove treatment: auto, shine, shadow or smooth')
+    add_look_arguments(ap)
     args = ap.parse_args(argv)
 
     width, height = (int(v) for v in args.size.lower().split('x'))
@@ -130,7 +159,7 @@ def main(argv=None):
     elapsed = 0.42 if args.elapsed is None else args.elapsed
     art = args.art
     if args.album_dir:
-        tracks, cover = _album_info(args.album_dir)
+        tracks, cover = album_info(args.album_dir)
         total = len(tracks)
         track = max(1, min(track, total))
         lengths = [t['length'] for t in tracks]
@@ -148,20 +177,7 @@ def main(argv=None):
         art = _placeholder_art(os.path.join(os.path.dirname(os.path.abspath(args.out)),
                                             '_shot_art.png'))
 
-    config = {'display': {'width': width, 'height': height, 'fullscreen': False}}
-    settings = VinylSettings(style=args.style, label=args.label,
-                             label_text=args.label_text).update(
-        effects=[e for e in args.effects.split(',') if e], grooves=args.grooves)
-    # A non-empty album path is required: VinylRenderer.get_vinyl_style()
-    # resolves no style for a falsy path and the disc silently renders black.
-    display = Display(config, _FakePlayer(art, args.album_dir or '/lp-shot/album'), port=0,
-                      settings=settings)
-
-    display.window = sdl2_video.Window('lp-shot', size=(width, height), hidden=True)
-    display.renderer = sdl2_video.Renderer(display.window, accelerated=0)
-    display.renderer.logical_size = (width, height)
-    display._load_fonts()
-    display._build_needle_texture()
+    display = headless_display(width, height, settings_from_args(args), art, args.album_dir)
 
     status = {
         'playing': True,

@@ -71,6 +71,17 @@ def test_recent_persists_across_reload():
     assert got == [('B', 'b1'), ('A', 'a1')]
 
 
+def test_recent_remove_takes_an_album_off_and_reports_it():
+    s = _state()
+    s.mark_album_played('A', 'a1')
+    s.mark_album_played('B', 'b1')
+    assert s.remove_recent_album('A', 'a1') is True
+    assert [(e['artist'], e['folder']) for e in s.get_recent_albums()] == [('B', 'b1')]
+    assert s.remove_recent_album('A', 'a1') is False, 'already gone'
+    reloaded = UserState(s.path)
+    assert [(e['artist'], e['folder']) for e in reloaded.get_recent_albums()] == [('B', 'b1')]
+
+
 def test_get_recent_returns_copies():
     s = _state()
     s.mark_album_played('A', 'a1')

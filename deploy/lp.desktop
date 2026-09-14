@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=lp
+Comment=Play albums like a record player plays albums
+# deploy/install.sh fills in @HOME@ and @LP_HOME@; a .desktop Exec line does
+# not expand shell variables.
+Exec=env LP_HOME=@LP_HOME@ LP_CACHE_DIR=@LP_HOME@/cache LP_DATA_DIR=@LP_HOME@/data @LP_HOME@/venv/bin/python @LP_HOME@/current/main.py -c @HOME@/.config/lp/config.yml --open
+Path=@LP_HOME@/current
+Icon=lp
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;album;vinyl;record;

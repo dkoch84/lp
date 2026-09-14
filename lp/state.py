@@ -113,6 +113,20 @@ class UserState:
             del self.recent_albums[RECENT_ALBUMS_LIMIT:]
             self._save_locked()
 
+    def remove_recent_album(self, artist, folder):
+        """Take an album off the recently-played list (a mis-tap, or one you
+        would rather not be reminded of). Returns True if it was there."""
+        with self._lock:
+            before = len(self.recent_albums)
+            self.recent_albums = [
+                e for e in self.recent_albums
+                if not (e['artist'] == artist and e['folder'] == folder)
+            ]
+            removed = len(self.recent_albums) != before
+            if removed:
+                self._save_locked()
+            return removed
+
     def get_recent_albums(self):
         """Most-recent-first copy of the recently-played albums."""
         with self._lock:

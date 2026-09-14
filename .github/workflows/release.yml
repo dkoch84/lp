@@ -1,0 +1,67 @@
+# Build a release's assets on tag push and attach them to the GitHub Release.
+#
+# What ships (built by lp/release.py, consumed by lp/update.py on every install):
+#   lp-<tag>.tar.gz                the source at the tag, RELEASE-stamped
+#   vinyl-cache-<family>.tar.gz    the committed lpcore/cache/<family> images
+#   release-manifest.json          sha256 of everything, per image too
+#
+# Nothing is rendered here. The images in git are the ones that were looked
+# at, so the workflow packs them and only checks (in seconds) that none is
+# stale against the committed renderer: `prerender --check` compares each
+# style's recorded key (see lpcore/vinyl/prerender.py) and fails the release
+# if a retuned style was not re-rendered and committed.
+#
+# Flow: `git tag <name> && git push origin <name>`. If no release exists for
+# the tag yet, one is created with generated notes; edit them on GitHub
+# afterwards. Re-run by hand (workflow_dispatch) to rebuild assets for an
+# existing tag; uploads replace what is there.
+name: Release
+
+on:
+  push:
+    tags: ['*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: existing tag to (re)build assets for
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  assets:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install the kiosk requirements
+        run: pip install -r requirements.txt
+
+      - name: Check the committed vinyl images match the committed renderer
+        run: python -m lpcore.vinyl.prerender --check
+
+      - name: Build the release assets
+        run: python -m lp.release --tag "$TAG" --out dist
+
+      - name: Attach them to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="$(python -c 'import sys; from lpcore.version import release_title; print(release_title(sys.argv[1]))' "$TAG")"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$title" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          ls -la dist

@@ -18,7 +18,10 @@ import time
 
 import pygame
 
-THUMB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'thumbs')
+# In a checkout this is lp/cache/thumbs; a release install points LP_CACHE_DIR
+# at a shared folder so thumbnails survive an update.
+THUMB_DIR = (os.path.join(os.environ['LP_CACHE_DIR'], 'thumbs') if os.environ.get('LP_CACHE_DIR')
+             else os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache', 'thumbs'))
 THUMB_MAX = 320  # px on the long edge — plenty for grid tiles on hi-dpi screens
 
 _gen_lock = threading.Lock()

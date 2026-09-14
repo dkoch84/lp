@@ -15,6 +15,14 @@ api:
   host: 0.0.0.0
   port: 8000
 
+# Self-update (release installs only; a git checkout ignores this). lp checks
+# GitHub for a new release every check_hours; with auto on it downloads the
+# release and switches to it once the current album has finished. The web UI
+# has Check now / Install now / After this album either way.
+updates:
+  auto: true
+  check_hours: 6
+
 lastfm:
   api_key: ""
   api_secret: ""
