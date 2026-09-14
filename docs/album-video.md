@@ -15,6 +15,6 @@ Options (pass them as `ARGS="..."` to `make video`, or call `python -m lp.video`
 - `--preview 20`: only the first 20 seconds, to check the look
 - `--codec h264`: for players without HEVC
 - `--size 1280x720`, `--fps 30`
-- `--style`, `--label`, `--label-text`, `--effects`, `--grooves`, `--frame-color`, `--panel-color`: the same values the web UI's vinyl page uses
+- `--style`, `--label`, `--label-text`, `--label-font`, `--artist-color`, `--album-color`, `--effects`, `--grooves`, `--frame-color`, `--panel-color`: the same values the web UI's vinyl page uses
 
 lp-deck has the same thing as a **Video…** button on every album page.

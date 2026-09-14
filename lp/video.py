@@ -383,6 +383,22 @@ def _parse_progress(line):
     return None
 
 
+def _progress_bar(duration):
+    """A tqdm bar for the encode when a person is watching a terminal, else
+    None. lp-deck reads this output through a pipe and turns the plain
+    "... to go" lines into notices, and tqdm is optional (requirements-deck.txt),
+    so without a terminal or without tqdm the lines stay."""
+    if not sys.stderr.isatty():
+        return None
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        return None
+    return tqdm(total=duration, desc='  encoding', unit='s', dynamic_ncols=True,
+                bar_format='{desc} {percentage:3.0f}%|{bar}| {elapsed} elapsed, '
+                           'about {remaining} to go{postfix}')
+
+
 def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hevc',
            seconds=None, ffmpeg='ffmpeg', log=print):
     """Render ``plan`` to ``out`` (and ``out`` + '.txt'). ``seconds`` caps the
@@ -419,16 +435,27 @@ def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hev
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         encode_started = time.monotonic()
         last_report = -10.0
-        for line in proc.stdout:
-            t = _parse_progress(line.strip())
-            if t is None or t - last_report < 10.0:
-                continue
-            last_report = t
-            elapsed = time.monotonic() - encode_started
-            speed = t / elapsed if elapsed > 0 else 0.0
-            eta = (duration - t) / speed if speed > 0 else 0.0
-            log(f'  {_mmss(t)} / {_mmss(duration)}  {speed:.1f}x realtime, '
-                f'about {_mmss(eta)} to go')
+        bar = _progress_bar(duration) if log is print else None
+        try:
+            for line in proc.stdout:
+                t = _parse_progress(line.strip())
+                if t is None:
+                    continue
+                elapsed = time.monotonic() - encode_started
+                speed = t / elapsed if elapsed > 0 else 0.0
+                if bar is not None:
+                    bar.update(max(0.0, min(t, duration)) - bar.n)
+                    bar.set_postfix_str(f'{speed:.1f}x realtime')
+                    continue
+                if t - last_report < 10.0:
+                    continue
+                last_report = t
+                eta = (duration - t) / speed if speed > 0 else 0.0
+                log(f'  {_mmss(t)} / {_mmss(duration)}  {speed:.1f}x realtime, '
+                    f'about {_mmss(eta)} to go')
+        finally:
+            if bar is not None:
+                bar.close()
         stderr = proc.stderr.read()
         code = proc.wait()
         if code:

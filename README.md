@@ -8,7 +8,7 @@ Install, setup and everything else: [docs](docs/README.md).
 
 ## Crucible & Ruin
 
-![Howling Giant, Crucible & Ruin, on teal-marble vinyl](screenshots/kiosk-howling-giant.jpg)
+![Howling Giant, Crucible & Ruin, on teal-marble vinyl](screenshots/crucible.gif)
 
 - **Teal-marble vinyl**: the one above.
 - **Vinyl effects**: glass, deep edge and rim light, plus four groove looks.

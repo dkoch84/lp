@@ -8,7 +8,6 @@ display:
   fullscreen: false
   width: 1920
   height: 1080
-  show_metadata: true
   url: https://lp.example.com
 
 api:

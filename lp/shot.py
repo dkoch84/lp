@@ -116,6 +116,12 @@ def add_look_arguments(ap):
                     help='label id (e.g. art, label-white, color-cyan)')
     ap.add_argument('--label-text', default=VinylSettings.label_text,
                     help='artist and album on the label: none, curved, straight or blocky')
+    ap.add_argument('--label-font', default=VinylSettings.label_font,
+                    help='font for the label text (e.g. georgia, dejavuserif)')
+    ap.add_argument('--artist-color', default='auto',
+                    help='colour of the artist on the label: auto or #rrggbb')
+    ap.add_argument('--album-color', default='auto',
+                    help='colour of the album on the label: auto or #rrggbb')
     ap.add_argument('--effects', default='',
                     help='comma-separated Vinyl Effects (e.g. glass,rim-light)')
     ap.add_argument('--grooves', default='auto',
@@ -130,7 +136,9 @@ def settings_from_args(args):
     return VinylSettings(style=args.style, label=args.label,
                          label_text=args.label_text).update(
         effects=[e for e in args.effects.split(',') if e], grooves=args.grooves,
-        frame_color=args.frame_color, panel_color=args.panel_color)
+        frame_color=args.frame_color, panel_color=args.panel_color,
+        label_font=args.label_font, artist_color=args.artist_color,
+        album_color=args.album_color)
 
 
 def main(argv=None):
