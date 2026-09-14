@@ -17,6 +17,7 @@ from lp.launch import resolve_port, lan_ip
 from lpcore.vinyl.settings import VinylSettings
 from lpcore.paths import data_file
 from lp.update import UpdateManager
+from lp.looks import Looks
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -88,7 +89,10 @@ def main():
     state_path = data_file('.lp_state.json')
     state = UserState(state_path)
     # Shared vinyl display config: the web API mutates it, the display reads it.
+    # Looks keeps it in step with the saved global look and the playing
+    # album's own look, and persists every edit.
     settings = VinylSettings()
+    looks = Looks(data_file('.lp_looks.json'), settings, player)
     # Self-update: only active on a release install (~/lp/current -> releases/<tag>);
     # a git checkout reports itself unmanaged and the web UI hides the controls.
     updates = UpdateManager(config.get('updates', {}), player)
@@ -96,13 +100,13 @@ def main():
 
     if args.no_display:
         app = create_app(player, library, static_dir, scrobbler, state=state,
-                         settings=settings, updates=updates)
+                         settings=settings, updates=updates, looks=looks)
         uvicorn.run(app, host=host, port=port, log_level="info")
     else:
         from lp.display import Display
         display = Display(config, player, port, settings=settings)
         app = create_app(player, library, static_dir, scrobbler, display, state,
-                         settings=settings, updates=updates)
+                         settings=settings, updates=updates, looks=looks)
         api_thread = threading.Thread(
             target=uvicorn.run,
             args=(app,),

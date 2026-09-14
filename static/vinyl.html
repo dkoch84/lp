@@ -279,6 +279,22 @@
     }
     .lt-auto.active { background: #2c3b56; border-color: #4a7; color: #bcd6ff; }
 
+    /* Scope: which look the edits below go to */
+    #scope-bar { padding: 14px 20px 4px; }
+    #scope-bar .scope-label { color: #888; font-size: 0.8rem; margin-bottom: 8px; }
+    .scope-buttons { display: flex; gap: 8px; }
+    .scope-buttons button {
+      flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #333;
+      background: #1c1c1c; color: #ccc; font-size: 0.9rem; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .scope-buttons button.active { background: #2c3b56; border-color: #4a7; color: #bcd6ff; }
+    .scope-buttons button:disabled { opacity: 0.4; cursor: default; }
+    #scope-note { color: #8ab89f; font-size: 0.8rem; margin-top: 8px; min-height: 1em; }
+    #scope-note button {
+      background: none; border: none; color: #e8a0a0; font-size: 0.8rem; cursor: pointer;
+      padding: 0 0 0 8px; text-decoration: underline;
+    }
     .slider-row { display: flex; align-items: center; gap: 12px; }
     .slider-row input[type="range"] { flex: 1; accent-color: #888; }
     .slider-value { color: #aaa; font-size: 0.85rem; min-width: 36px; text-align: right; }
@@ -319,6 +335,14 @@
     <span id="current-style"></span>
   </header>
 
+  <div id="scope-bar">
+    <div class="scope-label">Changes below apply to</div>
+    <div class="scope-buttons">
+      <button id="scope-global" class="active">All albums</button>
+      <button id="scope-album" disabled>Nothing playing</button>
+    </div>
+    <div id="scope-note"></div>
+  </div>
   <div id="style-root"></div>
   <div id="controls-root"></div>
 
@@ -358,9 +382,65 @@
       if (!res.ok) throw new Error(`${res.status}`);
       return res.json();
     }
+    // Every look edit carries the scope picked at the top of the page:
+    // 'global' (all albums) or 'album' (the one playing now). lp/looks.py
+    // keeps both and layers the album's look over the global one.
+    let currentScope = 'global';
     const post = (path, body) => api(path, {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
-    });
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(path.startsWith('/api/settings/') ? {...body, scope: currentScope} : body),
+    }).then((res) => { refreshScope(); return res; });
+
+    // --- Scope: all albums, or the album that is on ---
+
+    const scopeGlobal = document.getElementById('scope-global');
+    const scopeAlbum = document.getElementById('scope-album');
+    const scopeNote = document.getElementById('scope-note');
+    let looksState = null;
+
+    function setScope(scope) {
+      currentScope = scope;
+      scopeGlobal.classList.toggle('active', scope === 'global');
+      scopeAlbum.classList.toggle('active', scope === 'album');
+      renderScopeNote();
+    }
+
+    function renderScopeNote() {
+      const st = looksState;
+      scopeNote.innerHTML = '';
+      if (!st || !st.album) return;
+      if (st.album_has_look) {
+        scopeNote.textContent = currentScope === 'album'
+          ? 'This album keeps its own look.'
+          : 'This album keeps its own look, so changes to All albums show once it ends.';
+        const forget = document.createElement('button');
+        forget.textContent = 'Forget it';
+        forget.addEventListener('click', async () => {
+          await api('/api/settings/looks/album', {method: 'DELETE'});
+          await refreshScope();
+          location.reload();          // the controls now show the global look
+        });
+        scopeNote.appendChild(forget);
+      } else if (currentScope === 'album') {
+        scopeNote.textContent = 'The next change starts a look just for this album.';
+      }
+    }
+
+    async function refreshScope() {
+      try {
+        looksState = await api('/api/settings/looks');
+      } catch {
+        return;
+      }
+      const name = looksState.album_name || (looksState.album ? looksState.album.split('/').pop() : '');
+      scopeAlbum.disabled = !looksState.album;
+      scopeAlbum.textContent = looksState.album ? `This album: ${name}` : 'Nothing playing';
+      if (!looksState.album && currentScope === 'album') setScope('global');
+      renderScopeNote();
+    }
+
+    scopeGlobal.addEventListener('click', () => setScope('global'));
+    scopeAlbum.addEventListener('click', () => { if (!scopeAlbum.disabled) setScope('album'); });
 
     // --- Thumbnails ---
 
@@ -728,6 +808,29 @@
       return row;
     }
 
+    function renderColors(state) {
+      const section = document.createElement('div');
+      section.className = 'slider-section';
+      const h2 = document.createElement('h2'); h2.textContent = 'Background';
+      section.appendChild(h2);
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:#777;font-size:0.8rem;margin-bottom:6px';
+      hint.textContent = 'Auto is near black. Pick pure black when a cover has a dark edge.';
+      section.appendChild(hint);
+      const setColors = (patch) => post('/api/settings/colors', patch);
+      section.appendChild(labelRow('Panel', ...colorControl(state.panel_color,
+        (v) => setColors({ panel_color: v }))));
+      section.appendChild(labelRow('Frame', ...colorControl(state.frame_color,
+        (v) => setColors({ frame_color: v }))));
+      const both = document.createElement('button');
+      both.className = 'lt-auto';
+      both.textContent = 'Both pure black';
+      both.addEventListener('click', () => setColors({ panel_color: '#000000', frame_color: '#000000' })
+        .then(() => location.reload()));
+      section.appendChild(labelRow('', both));
+      return section;
+    }
+
     function renderLabelText(data) {
       const section = document.createElement('div');
       section.className = 'slider-section';
@@ -834,7 +937,7 @@
     // --- Init ---
 
     async function init() {
-      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes, effectsRes] = await Promise.all([
+      const [styleRes, optRes, labelRes, brightRes, lastfmRes, labelTextRes, effectsRes, colorsRes] = await Promise.all([
         api('/api/settings/vinyl'),
         api('/api/settings/vinyl/options'),
         api('/api/settings/label'),
@@ -842,7 +945,10 @@
         api('/api/settings/lastfm'),
         api('/api/settings/label-text/options'),
         api('/api/settings/effects'),
+        api('/api/settings/colors'),
       ]);
+      await refreshScope();
+      if (looksState && looksState.album_has_look) setScope('album');
       currentStyle = styleRes.style;
       currentLabel = labelRes.label;
       currentStyleEl.textContent = currentStyle;
@@ -867,6 +973,7 @@
       controlsRoot.appendChild(renderLabelText(labelTextRes));
       controlsRoot.appendChild(renderEffects(effectsRes));
       controlsRoot.appendChild(renderBrightness(brightRes.brightness));
+      controlsRoot.appendChild(renderColors(colorsRes));
       controlsRoot.appendChild(renderLastfm(lastfmRes));
     }
 

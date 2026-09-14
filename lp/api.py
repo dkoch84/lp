@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from lpcore.vinyl.settings import VinylSettings
 from lpcore.vinyl.catalog import LABEL_TEXT_MODES, LABEL_TEXT_FONTS, DECOR_EMOJI
 from lp.queue import AlbumQueue
+from lp.looks import Looks
 
 
 class PlayRequest(BaseModel):
@@ -16,15 +17,26 @@ class PlayRequest(BaseModel):
     start: int = 0
 
 
+# Every look edit carries a scope: 'global' (all albums) or 'album' (the one
+# playing now). See lp/looks.py.
 class VinylStyleRequest(BaseModel):
     style: str
+    scope: str = 'global'
 
 
 class LabelRequest(BaseModel):
     label: str
+    scope: str = 'global'
+
+
+class ColorsRequest(BaseModel):
+    frame_color: str | None = None
+    panel_color: str | None = None
+    scope: str = 'global'
 
 
 class LabelTextRequest(BaseModel):
+    scope: str = 'global'
     mode: str = None
     font: str = None
     artist_color: str = None
@@ -38,10 +50,12 @@ class LabelTextRequest(BaseModel):
 class EffectsRequest(BaseModel):
     effects: list[str] | None = None
     grooves: str | None = None
+    scope: str = 'global'
 
 
 class BrightnessRequest(BaseModel):
     brightness: int
+    scope: str = 'global'
 
 
 class LastfmAuthRequest(BaseModel):
@@ -70,10 +84,19 @@ class UpdateInstallRequest(BaseModel):
 
 
 def create_app(player, library, static_dir, scrobbler=None, display=None,
-               state=None, settings=None, updates=None):
+               state=None, settings=None, updates=None, looks=None):
     app = FastAPI(title="lp")
     if settings is None:
         settings = VinylSettings()
+    if looks is None:                     # unsaved, in-memory: tests and --no-display runs
+        looks = Looks(None, settings, player)
+
+    def _edit(scope, **changes):
+        """Apply a look edit at scope; a bad value or scope is a 400."""
+        try:
+            looks.update(scope, **changes)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/api/share")
     def share():
@@ -353,7 +376,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
                  + pattern_basic + pattern_combo)
         if req.style not in valid:
             raise HTTPException(400, f"Invalid style. Choose from: {', '.join(valid)}")
-        settings.style = req.style
+        _edit(req.scope, style=req.style)
         return {"style": settings.style}
 
     @app.get("/api/settings/vinyl/options")
@@ -465,7 +488,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
                  + ['munafo-' + v[0] for v in MUNAFO_VARIANTS])
         if req.label not in valid:
             raise HTTPException(400, f"Invalid label. Choose from: {', '.join(valid)}")
-        settings.label = req.label
+        _edit(req.scope, label=req.label)
         return {"label": settings.label}
 
     @app.get("/api/settings/label/options")
@@ -508,15 +531,11 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
     @app.post("/api/settings/label-text")
     def set_label_text(req: LabelTextRequest):
         # VinylSettings.update validates modes, fonts, colors, and decor centrally.
-        try:
-            settings.update(
-                label_text=req.mode, label_font=req.font,
-                artist_color=req.artist_color, album_color=req.album_color,
-                decor1=req.decor1, decor1_color=req.decor1_color,
-                decor2=req.decor2, decor2_color=req.decor2_color,
-            )
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+        _edit(req.scope,
+              label_text=req.mode, label_font=req.font,
+              artist_color=req.artist_color, album_color=req.album_color,
+              decor1=req.decor1, decor1_color=req.decor1_color,
+              decor2=req.decor2, decor2_color=req.decor2_color)
         return _label_text_state()
 
     @app.get("/api/settings/label-text/options")
@@ -542,11 +561,34 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.post("/api/settings/brightness")
     def set_brightness(req: BrightnessRequest):
-        try:
-            settings.update(brightness=req.brightness)
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+        _edit(req.scope, brightness=req.brightness)
         return {"brightness": settings.brightness}
+
+    # --- Frame and panel colours ---
+
+    @app.get("/api/settings/colors")
+    def get_colors():
+        return {"frame_color": settings.frame_color, "panel_color": settings.panel_color}
+
+    @app.post("/api/settings/colors")
+    def set_colors(req: ColorsRequest):
+        _edit(req.scope, frame_color=req.frame_color, panel_color=req.panel_color)
+        return {"frame_color": settings.frame_color, "panel_color": settings.panel_color}
+
+    # --- Looks: which album is on, and whether it keeps its own look ---
+
+    @app.get("/api/settings/looks")
+    def get_looks():
+        s = looks.status()
+        album = library.get_album_by_path(s["album"]) if s["album"] else None
+        s["album_name"] = album.display_name if album else None
+        return s
+
+    @app.delete("/api/settings/looks/album")
+    def forget_album_look():
+        if not looks.forget_album():
+            raise HTTPException(404, "the playing album has no look of its own")
+        return looks.status()
 
     # --- Vinyl Effects (finishes over any style) ---
 
@@ -560,15 +602,7 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
 
     @app.post("/api/settings/effects")
     def set_effects(req: EffectsRequest):
-        changes = {"effects": req.effects, "grooves": req.grooves}
-        try:
-            # validate everything first, so a bad value applies nothing
-            for key, value in changes.items():
-                if value is not None:
-                    VinylSettings._validate(key, value)
-            settings.update(**changes)
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
+        _edit(req.scope, effects=req.effects, grooves=req.grooves)
         return {"effects": settings.effects, "grooves": settings.grooves}
 
     # --- Library management ---

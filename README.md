@@ -130,6 +130,8 @@ lastfm:
 - Album playback via libVLC
 - A record that is on is not cut off by a stray tap: the web UI asks, and "Play next" queues the album for when this one ends
 - Recently played counts an album once a song of it has completed, so mis-taps never land on the shelf; anything there can be removed with its corner x
+- The look is saved (a restart keeps it), and an album can keep a look of its own: switch the vinyl page to "This album" while it plays
+- Frame and panel colours are yours to set; pure black lets a cover with a dark edge sit flush
 - Pygame vinyl visualization with spinning record, needle, and track grooves
 - Web UI for browsing and playback control
 - Vinyl styles: black, colored, clear, picture disc, Mandelbrot fractals, nebulae

@@ -34,6 +34,12 @@ class VinylSettings:
     decor2_color: str = 'auto'
     effects: list = field(default_factory=list)   # Vinyl Effects ids, see effects.py
     grooves: str = 'auto'             # auto | shine | shadow | smooth
+    # The kiosk frame (behind everything, and the idle screen) and the panel
+    # beside the art that the record sits on. 'auto' is the built-in near
+    # black; a cover with a true-black edge wants '#000000' so the panel does
+    # not read as a grey slab next to it.
+    frame_color: str = 'auto'
+    panel_color: str = 'auto'
 
     def to_dict(self):
         return asdict(self)
@@ -70,7 +76,8 @@ class VinylSettings:
         elif key == 'label_font':
             if value not in LABEL_TEXT_FONTS:
                 raise ValueError(f"label_font must be one of {LABEL_TEXT_FONTS}")
-        elif key in ('artist_color', 'album_color', 'decor1_color', 'decor2_color'):
+        elif key in ('artist_color', 'album_color', 'decor1_color', 'decor2_color',
+                     'frame_color', 'panel_color'):
             if not valid_color(value):
                 raise ValueError(f"{key} must be 'auto' or #rrggbb, got {value!r}")
         elif key in ('decor1', 'decor2'):

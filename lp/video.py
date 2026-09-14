@@ -43,6 +43,7 @@ import pygame
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lp.shot import add_look_arguments, album_info, headless_display, settings_from_args
+from lpcore.vinyl.settings import VinylSettings
 
 # The kiosk advances the record 0.8 degrees per frame at 30 fps. Time-based
 # here, so any --fps gives the same spin.
@@ -177,8 +178,7 @@ def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hev
     length, for previews. Returns the number of frames written."""
     if width % 2 or height % 2:
         raise ValueError('width and height must be even (yuv420p)')
-    settings = settings or settings_from_args(argparse.Namespace(
-        style='black', label='art', label_text='none', effects='', grooves='auto'))
+    settings = settings or VinylSettings(label='art', label_text='none')
     paths = [t['path'] for t in plan.tracks]
 
     with tempfile.TemporaryDirectory(prefix='lp-video-') as tmp:

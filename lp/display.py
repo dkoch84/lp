@@ -21,6 +21,16 @@ ACCENT = (200, 200, 200)
 NEEDLE_COLOR = (200, 200, 200)
 
 
+def parse_color(value, fallback):
+    """'#rrggbb' as an (r, g, b) tuple; anything else ('auto') is ``fallback``."""
+    if isinstance(value, str) and len(value) == 7 and value[0] == '#':
+        try:
+            return tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+        except ValueError:
+            pass
+    return fallback
+
+
 def fit_text(font, text, max_w):
     """`text`, tail-ellipsized until it renders within `max_w` px.
 
@@ -418,9 +428,15 @@ class Display:
         else:
             self._render_playing(status)
 
+    def _frame_color(self):
+        return parse_color(self.settings.frame_color, DARK_BG)
+
+    def _panel_color(self):
+        return parse_color(self.settings.panel_color, PANEL_BG)
+
     def _render_idle(self):
         self._record_rect = None
-        self.renderer.draw_color = DARK_BG
+        self.renderer.draw_color = self._frame_color()
         self.renderer.clear()
 
         tex, rect = self._text_tex('idle_lp', self._font_idle, 'lp', DIM_TEXT)
@@ -434,7 +450,7 @@ class Display:
         tex.draw(dstrect=dst)
 
     def _render_playing(self, status):
-        self.renderer.draw_color = DARK_BG
+        self.renderer.draw_color = self._frame_color()
         self.renderer.clear()
 
         art_width = int(self.height * 1.0)
@@ -459,11 +475,11 @@ class Display:
         if self._art_texture:
             self._art_texture.draw(dstrect=pygame.Rect(0, 0, art_width, self.height))
         else:
-            self.renderer.draw_color = PANEL_BG
+            self.renderer.draw_color = self._panel_color()
             self.renderer.fill_rect(pygame.Rect(0, 0, art_width, self.height))
 
         # Metadata panel
-        self.renderer.draw_color = PANEL_BG
+        self.renderer.draw_color = self._panel_color()
         self.renderer.fill_rect(pygame.Rect(meta_x, 0, meta_width, self.height))
 
         pad = int(meta_width * 0.08)

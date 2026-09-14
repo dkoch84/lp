@@ -120,12 +120,17 @@ def add_look_arguments(ap):
                     help='comma-separated Vinyl Effects (e.g. glass,rim-light)')
     ap.add_argument('--grooves', default='auto',
                     help='groove treatment: auto, shine, shadow or smooth')
+    ap.add_argument('--frame-color', default='auto',
+                    help="the frame behind everything: auto or #rrggbb")
+    ap.add_argument('--panel-color', default='auto',
+                    help="the panel beside the art: auto or #rrggbb")
 
 
 def settings_from_args(args):
     return VinylSettings(style=args.style, label=args.label,
                          label_text=args.label_text).update(
-        effects=[e for e in args.effects.split(',') if e], grooves=args.grooves)
+        effects=[e for e in args.effects.split(',') if e], grooves=args.grooves,
+        frame_color=args.frame_color, panel_color=args.panel_color)
 
 
 def main(argv=None):
