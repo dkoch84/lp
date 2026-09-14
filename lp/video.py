@@ -2,10 +2,26 @@
 
 The kiosk's now-playing frame is a pure function of (album, settings, time):
 which track is on, how far the needle has travelled, how far the record has
-turned. lp.shot renders one such frame headlessly; this walks every frame of
-the album in order and pipes them into ffmpeg together with the album's audio.
-The result is "that album, played on lp", ready for YouTube: a free whole-album
-visualizer with the vinyl spinning and the needle tracking through the grooves.
+turned. Nearly all of it is static for a whole track, so this does not draw
+frames one by one. It renders each layer once with the real kiosk code and
+hands them to ffmpeg to composite:
+
+    background, one per track    the art, the panel and the text, from
+                                 Display._render_playing with the record off
+    the spin                     one revolution of the record (body, grooves
+                                 and the fixed shine, drawn by the kiosk
+                                 renderer at every angle it would show), as
+                                 a short lossless clip that loops
+    the tonearm                  one small image per pixel of needle travel,
+                                 fed at the rate the needle actually moves
+
+so the whole album encodes as fast as the encoder allows: a few minutes with
+a hardware HEVC encoder (NVENC, VideoToolbox, QuickSync), rather than the
+hour-plus that drawing 85,000 frames in Python and feeding libx265 took.
+Every look option (style, label, label text, effects, grooves, colours)
+applies exactly as on the kiosk; it is set once per render. The record
+turns 24 degrees a second, so a revolution is exactly 15 seconds at any
+frame rate, which is why the spin clip loops seamlessly.
 
     python -m lp.video "/music/Howling Giant/2025 - Crucible & Ruin" crucible.mp4
     python -m lp.video ALBUM out.mp4 --fps 60 --style nebula-teal-marble --effects glass
@@ -18,12 +34,7 @@ track list for free. The same chapters are embedded in the MP4 itself.
 
 Output is HEVC (H.265) in an MP4 with the ``hvc1`` tag (what Apple players
 require), AAC audio at 320k. YouTube accepts HEVC uploads; use ``--codec h264``
-for anything that does not. Frames are rendered at the kiosk's own rate (30
-fps, the record turning 24 degrees a second) unless ``--fps`` says otherwise.
-
-Needs ffmpeg on PATH. Rendering is offline, so a machine that cannot draw the
-kiosk at full rate still produces a perfect video, just slower: expect a
-45-minute album to take about half an hour at 1080p30 on a laptop.
+for anything that does not. Needs ffmpeg on PATH.
 """
 import argparse
 import math
@@ -42,7 +53,9 @@ import pygame
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from lp.display import NEEDLE_COLOR, TONEARM_COLOR, tonearm_points
 from lp.shot import add_look_arguments, album_info, headless_display, settings_from_args
+from lpcore.vinyl.catalog import INNER_GROOVE, OUTER_GROOVE
 from lpcore.vinyl.settings import VinylSettings
 
 # The kiosk advances the record 0.8 degrees per frame at 30 fps. Time-based
@@ -50,12 +63,29 @@ from lpcore.vinyl.settings import VinylSettings
 RECORD_DEG_PER_SEC = 24.0
 AUDIO_RATE = 48000
 
-CODECS = {
-    # crf: HEVC is more efficient, so a higher number lands at similar quality.
-    'hevc': ['-c:v', 'libx265', '-preset', 'medium', '-crf', '22', '-tag:v', 'hvc1',
-             '-x265-params', 'log-level=error'],
-    'h264': ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18'],
+# Encoders in order of preference per codec. Hardware first: a laptop GPU
+# does HEVC at several times realtime where libx265 manages 0.7x. Each is
+# probed with a one-frame encode, since being listed does not mean usable.
+ENCODERS = {
+    'hevc': [
+        ('hevc_nvenc', ['-preset', 'p4', '-rc', 'vbr', '-cq', '24', '-b:v', '0', '-tag:v', 'hvc1']),
+        ('hevc_videotoolbox', ['-q:v', '60', '-tag:v', 'hvc1']),
+        ('hevc_qsv', ['-global_quality', '24', '-tag:v', 'hvc1']),
+        ('hevc_amf', ['-quality', 'quality', '-rc', 'cqp', '-qp_i', '24', '-qp_p', '24',
+                      '-tag:v', 'hvc1']),
+        # Software HEVC is the slow path (about 3x realtime at 1080p on a
+        # fast laptop); superfast at crf 22 is fine for an upload YouTube
+        # re-encodes anyway.
+        ('libx265', ['-preset', 'superfast', '-crf', '22', '-tag:v', 'hvc1',
+                     '-x265-params', 'log-level=error']),
+    ],
+    'h264': [
+        ('h264_nvenc', ['-preset', 'p4', '-rc', 'vbr', '-cq', '21', '-b:v', '0']),
+        ('h264_videotoolbox', ['-q:v', '65']),
+        ('libx264', ['-preset', 'medium', '-crf', '18']),
+    ],
 }
+_probed = {}
 
 
 def _mmss(seconds):
@@ -152,19 +182,79 @@ def audio_command(track_paths, wav_out, ffmpeg='ffmpeg'):
     return cmd
 
 
-def video_command(width, height, fps, wav, metadata, out, codec='hevc', ffmpeg='ffmpeg'):
-    """Encode raw RGB frames from stdin with the WAV and chapters into ``out``."""
-    if codec not in CODECS:
-        raise ValueError(f'codec must be one of {", ".join(CODECS)}, not {codec!r}')
+def encoder_works(name, ffmpeg='ffmpeg'):
+    """True when ffmpeg can actually encode one frame with ``name``."""
+    key = (ffmpeg, name)
+    if key not in _probed:
+        r = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
+                            '-i', 'color=size=256x144:rate=30', '-frames:v', '2',
+                            '-c:v', name, '-f', 'null', '-'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _probed[key] = r.returncode == 0
+    return _probed[key]
+
+
+def pick_encoder(codec='hevc', ffmpeg='ffmpeg'):
+    """(encoder name, its arguments) for ``codec``: the first that works."""
+    if codec not in ENCODERS:
+        raise ValueError(f'codec must be one of {", ".join(ENCODERS)}, not {codec!r}')
+    for name, args in ENCODERS[codec]:
+        if encoder_works(name, ffmpeg):
+            return name, list(args)
+    raise RuntimeError(f'ffmpeg has no working {codec} encoder')
+
+
+def compose_command(width, height, fps, backgrounds, spin, arm, wav, metadata, out,
+                    encoder, duration, ffmpeg='ffmpeg'):
+    """The one ffmpeg run that makes the video.
+
+    ``backgrounds`` is [(png, seconds)] in track order; ``spin`` is (clip,
+    x, y), one revolution of the record to loop at the record's rect; ``arm``
+    is (pattern, frames_per_second, x, y) for the tonearm image sequence;
+    ``encoder`` is (name, args) from pick_encoder.
+
+    Stills are decoded once and repeated with the loop filter, and every
+    input is converted to the output's yuv420 family up front, so the
+    per-frame work is two overlays on frames that need no conversion. (An
+    image input with ``-loop 1`` re-decodes the PNG every frame, and overlay
+    silently converts any RGB input each frame; both cost more than the
+    encode.)
+    """
+    name, enc_args = encoder
+    cmd = [ffmpeg, '-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y']
+    for png, _seconds in backgrounds:
+        cmd += ['-framerate', str(fps), '-i', png]
+    n = len(backgrounds)
+    clip, sx, sy = spin
+    cmd += ['-stream_loop', '-1', '-i', clip]
+    pattern, rate, ax, ay = arm
+    cmd += ['-framerate', f'{rate:.9f}', '-i', pattern]
+    cmd += ['-i', wav, '-i', metadata]
+    i_spin, i_arm, i_wav, i_meta = n, n + 1, n + 2, n + 3
+
+    parts = []
+    for i, (_png, seconds) in enumerate(backgrounds):
+        parts.append(f'[{i}:v]format=yuv420p,loop=loop=-1:size=1,'
+                     f'trim=duration={seconds:.3f},setpts=PTS-STARTPTS[g{i}]')
+    parts.append(''.join(f'[g{i}]' for i in range(n)) + f'concat=n={n}:v=1:a=0[bg]')
+    parts.append(f'[{i_arm}:v]format=yuva420p[arm]')
+    parts.append(f'[bg][{i_spin}:v]overlay=x={sx}:y={sy}:eof_action=repeat[b1];'
+                 f'[b1][arm]overlay=x={ax}:y={ay}:eof_action=repeat,fps={fps},format=yuv420p[v]')
+    cmd += ['-filter_complex', ';'.join(parts), '-map', '[v]', '-map', f'{i_wav}:a',
+            '-map_metadata', str(i_meta),
+            '-c:v', name, *enc_args, '-c:a', 'aac', '-b:a', '320k',
+            '-t', f'{duration:.3f}', '-movflags', '+faststart', out]
+    return cmd
+
+
+def spin_clip_command(width, height, fps, out, ffmpeg='ffmpeg'):
+    """Encode raw RGB frames from stdin as a lossless clip (the one revolution
+    of the record). yuv420p on purpose: the final video is 4:2:0 too, so
+    nothing is lost that would have survived, and the overlay stays cheap."""
     return [ffmpeg, '-hide_banner', '-loglevel', 'error', '-y',
             '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{width}x{height}',
             '-framerate', str(fps), '-i', '-',
-            '-i', wav,
-            '-i', metadata,
-            '-map', '0:v', '-map', '1:a', '-map_metadata', '2',
-            *CODECS[codec], '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac', '-b:a', '320k',
-            '-movflags', '+faststart', out]
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-qp', '0', '-pix_fmt', 'yuv420p', out]
 
 
 def wav_duration(path):
@@ -172,14 +262,102 @@ def wav_duration(path):
         return w.getnframes() / float(w.getframerate())
 
 
+def _save(surface, path):
+    pygame.image.save(surface, path)
+    return path
+
+
+def render_layers(plan, display, tmp, fps, ffmpeg='ffmpeg'):
+    """Draw every layer once. Returns what compose_command needs, except the
+    audio: backgrounds, spin, arm."""
+    lengths = [t['length'] for t in plan.tracks]
+    status0 = plan.status(0.001)
+
+    # Backgrounds: the frame with the record and arm left out, one per track.
+    display.draw_record = False
+    backgrounds = []
+    for i, seconds in enumerate(lengths):
+        display._render_playing(plan.status(plan.boundaries[i] + 0.001))
+        display.renderer.present()
+        png = _save(display.renderer.to_surface(), os.path.join(tmp, f'bg{i:03d}.png'))
+        backgrounds.append((png, seconds))
+    # The last track's background runs on past the tagged length, so a WAV
+    # a hair longer than the tags say never runs out of picture.
+    backgrounds[-1] = (backgrounds[-1][0], backgrounds[-1][1] + 5.0)
+    full_rect = display._record_rect
+    # The crop must lie inside the frame (a very small frame cannot hold the
+    # record's minimum size) and be even-sized for the yuv420p clip.
+    rect = full_rect.clip(pygame.Rect(0, 0, display.width, display.height))
+    rect.width -= rect.width % 2
+    rect.height -= rect.height % 2
+
+    # The spin: the kiosk renderer draws the record (body, grooves, shine)
+    # at every angle of one revolution; the square under the record is
+    # cropped out of each frame and piped into a lossless clip that loops.
+    # The square is plain panel colour, so the clip needs no alpha.
+    display.draw_record = True
+    display.draw_arm = False
+    frames = 15 * fps                            # 360 deg / 24 deg per s
+    clip = os.path.join(tmp, 'spin.mp4')
+    proc = subprocess.Popen(spin_clip_command(rect.width, rect.height, fps, clip, ffmpeg),
+                            stdin=subprocess.PIPE)
+    try:
+        for k in range(frames):
+            display._record_angle = (k * 360.0 / frames) % 360.0
+            display._render_playing(status0)
+            display.renderer.present()
+            square = display.renderer.to_surface().subsurface(rect)
+            proc.stdin.write(pygame.image.tobytes(square, 'RGB'))
+    finally:
+        proc.stdin.close()
+        if proc.wait():
+            raise RuntimeError('ffmpeg could not encode the spin clip')
+    display.draw_arm = True
+    spin = (clip, rect.x, rect.y)
+
+    # The tonearm: one image per pixel of needle travel, fed at the rate the
+    # needle moves, so the step matches the kiosk's own integer positions.
+    radius = full_rect.width // 2
+    rec_cx, rec_cy = full_rect.centerx, full_rect.centery
+    steps = max(2, int((OUTER_GROOVE - INNER_GROOVE) * radius) + 1)
+    points = [tonearm_points(rec_cx, rec_cy, radius, k / (steps - 1)) for k in range(steps)]
+    xs = [p[0] for pv, nd in points for p in (pv, nd)]
+    ys = [p[1] for pv, nd in points for p in (pv, nd)]
+    margin = 6
+    ax, ay = min(xs) - margin, min(ys) - margin
+    aw, ah = max(xs) - ax + margin, max(ys) - ay + margin + 1
+    for k, (pivot, needle) in enumerate(points):
+        layer = pygame.Surface((aw, ah), pygame.SRCALPHA)
+        px, py = pivot[0] - ax, pivot[1] - ay
+        nx, ny = needle[0] - ax, needle[1] - ay
+        pygame.draw.line(layer, TONEARM_COLOR, (px, py), (nx, ny))
+        pygame.draw.line(layer, TONEARM_COLOR, (px, py + 1), (nx, ny + 1))
+        pygame.draw.circle(layer, NEEDLE_COLOR, (nx, ny), 3)
+        _save(layer, os.path.join(tmp, f'arm{k:04d}.png'))
+    arm = (os.path.join(tmp, 'arm%04d.png'), (steps - 1) / max(plan.duration, 0.001), ax, ay)
+    return backgrounds, spin, arm
+
+
+def _parse_progress(line):
+    """Seconds encoded so far from an ffmpeg -progress line, or None."""
+    if line.startswith('out_time_us='):
+        try:
+            return int(line.split('=', 1)[1]) / 1e6
+        except ValueError:
+            return None
+    return None
+
+
 def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hevc',
            seconds=None, ffmpeg='ffmpeg', log=print):
     """Render ``plan`` to ``out`` (and ``out`` + '.txt'). ``seconds`` caps the
-    length, for previews. Returns the number of frames written."""
+    length, for previews. Returns the number of frames in the video."""
     if width % 2 or height % 2:
         raise ValueError('width and height must be even (yuv420p)')
     settings = settings or VinylSettings(label='art', label_text='none')
+    encoder = pick_encoder(codec, ffmpeg)
     paths = [t['path'] for t in plan.tracks]
+    started = time.monotonic()
 
     with tempfile.TemporaryDirectory(prefix='lp-video-') as tmp:
         wav = os.path.join(tmp, 'album.wav')
@@ -188,10 +366,6 @@ def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hev
         duration = wav_duration(wav)
         if seconds is not None:
             duration = min(duration, float(seconds))
-            trimmed = os.path.join(tmp, 'trim.wav')
-            subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', '-i', wav,
-                            '-t', str(duration), trimmed], check=True)
-            wav = trimmed
         metadata = os.path.join(tmp, 'chapters.txt')
         with open(metadata, 'w') as f:
             f.write(plan.ffmetadata())
@@ -199,33 +373,31 @@ def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hev
         pygame.init()
         display = headless_display(width, height, settings, plan.cover, plan.album_dir,
                                    title='lp-video')
+        log('  drawing the layers...')
+        backgrounds, spin, arm = render_layers(plan, display, tmp, fps, ffmpeg)
         total_frames = int(math.ceil(duration * fps))
         log(f'  {plan.title()}: {_mmss(duration)}, {total_frames} frames at '
-            f'{width}x{height}@{fps} ({codec})')
+            f'{width}x{height}@{fps} ({encoder[0]})')
 
-        proc = subprocess.Popen(video_command(width, height, fps, wav, metadata, out, codec,
-                                              ffmpeg),
-                                stdin=subprocess.PIPE)
-        started = time.monotonic()
-        surface = pygame.Surface((width, height))
-        try:
-            for frame in range(total_frames):
-                t = frame / fps
-                display._record_angle = (t * RECORD_DEG_PER_SEC) % 360.0
-                display._render_playing(plan.status(t))
-                display.renderer.present()
-                display.renderer.to_surface(surface)
-                proc.stdin.write(pygame.image.tobytes(surface, 'RGB'))
-                if frame % (fps * 10) == 0 and frame:
-                    rate = frame / (time.monotonic() - started)
-                    eta = (total_frames - frame) / rate if rate else 0
-                    log(f'  {_mmss(t)} / {_mmss(duration)}  {rate:.0f} fps, '
-                        f'about {_mmss(eta)} to go')
-        finally:
-            proc.stdin.close()
-            code = proc.wait()
+        cmd = compose_command(width, height, fps, backgrounds, spin, arm, wav, metadata,
+                              out, encoder, duration, ffmpeg)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        encode_started = time.monotonic()
+        last_report = -10.0
+        for line in proc.stdout:
+            t = _parse_progress(line.strip())
+            if t is None or t - last_report < 10.0:
+                continue
+            last_report = t
+            elapsed = time.monotonic() - encode_started
+            speed = t / elapsed if elapsed > 0 else 0.0
+            eta = (duration - t) / speed if speed > 0 else 0.0
+            log(f'  {_mmss(t)} / {_mmss(duration)}  {speed:.1f}x realtime, '
+                f'about {_mmss(eta)} to go')
+        stderr = proc.stderr.read()
+        code = proc.wait()
         if code:
-            raise RuntimeError(f'ffmpeg exited {code}')
+            raise RuntimeError(f'ffmpeg exited {code}: {stderr.strip()[-2000:]}')
 
     with open(out + '.txt', 'w') as f:
         f.write(plan.description())
@@ -240,7 +412,7 @@ def main(argv=None):
     ap.add_argument('out', help='output .mp4')
     ap.add_argument('--size', default='1920x1080', help='resolution, WxH (default 1920x1080)')
     ap.add_argument('--fps', type=int, default=30, help='frame rate (default 30, the kiosk rate)')
-    ap.add_argument('--codec', choices=sorted(CODECS), default='hevc',
+    ap.add_argument('--codec', choices=sorted(ENCODERS), default='hevc',
                     help='video codec (default hevc; h264 for players without HEVC)')
     ap.add_argument('--preview', type=float, default=None, metavar='SECONDS',
                     help='render only the first SECONDS, to check the look')

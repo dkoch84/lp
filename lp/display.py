@@ -19,6 +19,21 @@ DIM_TEXT = (80, 80, 80)
 ACCENT = (200, 200, 200)
 
 NEEDLE_COLOR = (200, 200, 200)
+TONEARM_COLOR = (70, 70, 70)
+
+
+def tonearm_points(rec_cx, rec_cy, record_size, frac):
+    """Where the tonearm sits for a record centred at (rec_cx, rec_cy) with
+    radius record_size, ``frac`` of the way through the album: (pivot,
+    needle) as integer points. Shared with lp.video, which draws the arm
+    itself, so the two can never disagree."""
+    groove_range = (OUTER_GROOVE - INNER_GROOVE) * record_size
+    needle_r = record_size * OUTER_GROOVE - frac * groove_range
+    needle_angle = math.radians(-60)
+    needle = (int(rec_cx + needle_r * math.cos(needle_angle)),
+              int(rec_cy + needle_r * math.sin(needle_angle)))
+    pivot = (int(rec_cx + record_size * 1.15), int(rec_cy - record_size * 0.9))
+    return pivot, needle
 
 
 def parse_color(value, fallback):
@@ -168,6 +183,11 @@ class Display:
         self.url = self.config.get('url', 'https://lp.example.com')
 
         self._dirty = True
+        # lp.video turns these off to get the frame without the record, or
+        # without the arm (it composites those itself); _record_rect is
+        # still computed either way.
+        self.draw_record = True
+        self.draw_arm = True
         self._art_path = None
         self._art_texture = None
         self._status_cache = None
@@ -543,6 +563,14 @@ class Display:
         with self.player._lock:
             album_path = self.player.album_path
 
+        rec_cx = meta_x + meta_width // 2
+        rec_cy = y + record_size + int(self.height * 0.01)
+        d = record_size * 2
+        rec_dst = pygame.Rect(rec_cx - record_size, rec_cy - record_size, d, d)
+        self._record_rect = rec_dst
+        if not self.draw_record:
+            return
+
         # Body: supersampled texture, GPU downscales 2:1 during draw.
         body_key = (album_path, self.settings.style, self.settings.label,
                     self.settings.brightness, record_size, 'body',
@@ -580,31 +608,20 @@ class Display:
             self._shine_texture = sdl2_video.Texture.from_surface(self.renderer, shine_surf)
             self._shine_texture.blend_mode = pygame.BLENDMODE_BLEND
 
-        rec_cx = meta_x + meta_width // 2
-        rec_cy = y + record_size + int(self.height * 0.01)
-        d = record_size * 2
-        rec_dst = pygame.Rect(rec_cx - record_size, rec_cy - record_size, d, d)
-        self._record_rect = rec_dst
         self._record_texture.draw(dstrect=rec_dst, angle=self._record_angle)
         self._grooves_texture.draw(dstrect=rec_dst, angle=self._record_angle)
         # Drawn WITHOUT angle — the reflection stays fixed as the disc spins.
         self._shine_texture.draw(dstrect=rec_dst)
 
+        if not self.draw_arm:
+            return
+
         # Needle — drawn on top, not rotating with the record
-        if album_dur > 0:
-            frac = min(elapsed / album_dur, 1.0)
-        else:
-            frac = 0.0
-        groove_range = (OUTER_GROOVE - INNER_GROOVE) * record_size
-        needle_r = record_size * OUTER_GROOVE - frac * groove_range
-        needle_angle = math.radians(-60)
-        needle_x = int(rec_cx + needle_r * math.cos(needle_angle))
-        needle_y = int(rec_cy + needle_r * math.sin(needle_angle))
+        frac = min(elapsed / album_dur, 1.0) if album_dur > 0 else 0.0
+        (pivot_x, pivot_y), (needle_x, needle_y) = tonearm_points(rec_cx, rec_cy, record_size, frac)
 
         # Tonearm — two parallel lines to simulate the old width=2
-        pivot_x = int(rec_cx + record_size * 1.15)
-        pivot_y = int(rec_cy - record_size * 0.9)
-        self.renderer.draw_color = (70, 70, 70)
+        self.renderer.draw_color = TONEARM_COLOR
         self.renderer.draw_line((pivot_x, pivot_y), (needle_x, needle_y))
         self.renderer.draw_line((pivot_x, pivot_y + 1), (needle_x, needle_y + 1))
 

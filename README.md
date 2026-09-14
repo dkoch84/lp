@@ -92,7 +92,9 @@ make video ALBUM="/music/Howling Giant/2025 - Crucible & Ruin" OUT=crucible.mp4
 
 Renders the whole album exactly as the kiosk plays it, vinyl spinning and the
 needle tracking through the grooves, to a 1080p HEVC MP4 with the album's audio
-joined gapless. Beside it lands a `.txt` with the YouTube description: a
+joined gapless. The layers are drawn once by the kiosk renderer and ffmpeg
+composites them, so an album takes a few minutes with a hardware encoder
+(NVENC, VideoToolbox, QuickSync are picked up automatically). Beside it lands a `.txt` with the YouTube description: a
 timestamp per track, which YouTube turns into chapters. A free whole-album
 visualizer for any band. `--preview 20` renders the first twenty seconds to
 check the look; `--style`, `--effects` and the rest take the same values the
