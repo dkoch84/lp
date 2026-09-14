@@ -64,25 +64,33 @@ RECORD_DEG_PER_SEC = 24.0
 AUDIO_RATE = 48000
 
 # Encoders in order of preference per codec. Hardware first: a laptop GPU
-# does HEVC at several times realtime where libx265 manages 0.7x. Each is
-# probed with a one-frame encode, since being listed does not mean usable.
+# does HEVC at ten times realtime where libx265 manages one or two. Each is
+# probed with a one-frame encode using these exact arguments, since being
+# listed does not mean usable.
+#
+# B-frames are off everywhere. On a slowly turning, high-detail record the
+# P-frames come out visibly sharper than the B-frames between them, and that
+# 7.5 Hz sharp/soft pulse reads as jitter (measured: the frame-to-frame
+# sharpness swing halves with -bf 0, at the same speed and about a quarter
+# more bitrate, which an upload can afford).
 ENCODERS = {
     'hevc': [
-        ('hevc_nvenc', ['-preset', 'p4', '-rc', 'vbr', '-cq', '24', '-b:v', '0', '-tag:v', 'hvc1']),
+        ('hevc_nvenc', ['-preset', 'p4', '-rc', 'vbr', '-cq', '24', '-b:v', '0', '-bf', '0',
+                        '-tag:v', 'hvc1']),
         ('hevc_videotoolbox', ['-q:v', '60', '-tag:v', 'hvc1']),
-        ('hevc_qsv', ['-global_quality', '24', '-tag:v', 'hvc1']),
-        ('hevc_amf', ['-quality', 'quality', '-rc', 'cqp', '-qp_i', '24', '-qp_p', '24',
+        ('hevc_qsv', ['-global_quality', '24', '-bf', '0', '-tag:v', 'hvc1']),
+        ('hevc_amf', ['-quality', 'quality', '-rc', 'cqp', '-qp_i', '24', '-qp_p', '24', '-bf', '0',
                       '-tag:v', 'hvc1']),
-        # Software HEVC is the slow path (about 3x realtime at 1080p on a
+        # Software HEVC is the slow path (about 2x realtime at 1080p on a
         # fast laptop); superfast at crf 22 is fine for an upload YouTube
         # re-encodes anyway.
         ('libx265', ['-preset', 'superfast', '-crf', '22', '-tag:v', 'hvc1',
-                     '-x265-params', 'log-level=error']),
+                     '-x265-params', 'log-level=error:bframes=0']),
     ],
     'h264': [
-        ('h264_nvenc', ['-preset', 'p4', '-rc', 'vbr', '-cq', '21', '-b:v', '0']),
+        ('h264_nvenc', ['-preset', 'p4', '-rc', 'vbr', '-cq', '21', '-b:v', '0', '-bf', '0']),
         ('h264_videotoolbox', ['-q:v', '65']),
-        ('libx264', ['-preset', 'medium', '-crf', '18']),
+        ('libx264', ['-preset', 'medium', '-crf', '18', '-bf', '0']),
     ],
 }
 _probed = {}
@@ -182,13 +190,13 @@ def audio_command(track_paths, wav_out, ffmpeg='ffmpeg'):
     return cmd
 
 
-def encoder_works(name, ffmpeg='ffmpeg'):
-    """True when ffmpeg can actually encode one frame with ``name``."""
-    key = (ffmpeg, name)
+def encoder_works(name, ffmpeg='ffmpeg', args=()):
+    """True when ffmpeg can actually encode a frame with ``name`` and ``args``."""
+    key = (ffmpeg, name, tuple(args))
     if key not in _probed:
         r = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
                             '-i', 'color=size=256x144:rate=30', '-frames:v', '2',
-                            '-c:v', name, '-f', 'null', '-'],
+                            '-c:v', name, *args, '-f', 'null', '-'],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _probed[key] = r.returncode == 0
     return _probed[key]
@@ -199,7 +207,7 @@ def pick_encoder(codec='hevc', ffmpeg='ffmpeg'):
     if codec not in ENCODERS:
         raise ValueError(f'codec must be one of {", ".join(ENCODERS)}, not {codec!r}')
     for name, args in ENCODERS[codec]:
-        if encoder_works(name, ffmpeg):
+        if encoder_works(name, ffmpeg, args):
             return name, list(args)
     raise RuntimeError(f'ffmpeg has no working {codec} encoder')
 

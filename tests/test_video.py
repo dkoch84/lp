@@ -135,11 +135,23 @@ def test_every_encoder_table_entry_tags_hevc_for_apple_players():
         assert '-tag:v' not in args, name
 
 
+def test_b_frames_are_off_wherever_the_encoder_has_the_knob():
+    """P-frames sharper than the B-frames between them pulse at 7.5 Hz on a
+    slowly turning record; that looked like jitter in the first render."""
+    from lp.video import ENCODERS
+    for codec, table in ENCODERS.items():
+        for name, args in table:
+            if 'videotoolbox' in name:
+                continue                    # no B-frame option exposed
+            joined = ' '.join(args)
+            assert '-bf 0' in joined or 'bframes=0' in joined, (codec, name)
+
+
 def test_pick_encoder_takes_the_first_that_works(monkeypatch):
     from lp import video
-    monkeypatch.setattr(video, 'encoder_works', lambda name, ffmpeg='ffmpeg': name == 'libx265')
+    monkeypatch.setattr(video, 'encoder_works', lambda name, ffmpeg='ffmpeg', args=(): name == 'libx265')
     assert video.pick_encoder('hevc')[0] == 'libx265'
-    monkeypatch.setattr(video, 'encoder_works', lambda name, ffmpeg='ffmpeg': False)
+    monkeypatch.setattr(video, 'encoder_works', lambda name, ffmpeg='ffmpeg', args=(): False)
     with pytest.raises(RuntimeError, match='no working'):
         video.pick_encoder('hevc')
     with pytest.raises(ValueError):
