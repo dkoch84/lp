@@ -435,6 +435,8 @@ def test_release_assets_round_trip_through_the_updater(tmp_path, home):
     _git(repo, 'init', '-q')
     (repo / 'main.py').write_text('print("lp")\n')
     (repo / 'requirements.txt').write_text('pygame-ce\n')
+    (repo / 'lpcore' / 'cache' / 'nebula').mkdir(parents=True)
+    (repo / 'lpcore' / 'cache' / 'nebula' / 'committed.png').write_bytes(b'PNG')
     _git(repo, 'add', '.')
     _git(repo, 'commit', '-q', '-m', 'init')
     _git(repo, 'tag', 'crucible-and-ruin')
@@ -455,6 +457,8 @@ def test_release_assets_round_trip_through_the_updater(tmp_path, home):
         names = tar.getnames()
         assert 'lp-crucible-and-ruin/RELEASE' in names
         assert tar.extractfile('lp-crucible-and-ruin/RELEASE').read() == b'crucible-and-ruin\n'
+        assert not [n for n in names if '/lpcore/cache/' in n], \
+            'the committed images ship in the cache tarballs, not the source'
     written = json.load(open(out / MANIFEST_NAME))
     assert written == manifest
 

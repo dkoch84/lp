@@ -62,16 +62,22 @@ def build_source_tarball(tag, out_path, repo=None):
 
     The archive is taken uncompressed so the stamp can be appended with
     tarfile, then gzipped in one pass; ``git archive`` itself cannot add a file
-    that is not in the tree.
+    that is not in the tree. The committed vinyl images are left out: a
+    release install gets them from the per-family cache tarballs into its
+    shared cache folder, so shipping them here too would only make every
+    update 150 MB heavier.
     """
     repo = repo or repo_dir()
     prefix = f'lp-{tag}/'
+    skip = prefix + 'lpcore/cache/'
     raw = subprocess.run(['git', '-C', repo, 'archive', '--format=tar',
                           f'--prefix={prefix}', tag],
                          capture_output=True, check=True).stdout
     with open(out_path, 'wb') as out, tarfile.open(fileobj=out, mode='w:gz') as tar:
         with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as src:
             for member in src:
+                if member.name.startswith(skip):
+                    continue
                 tar.addfile(member, src.extractfile(member) if member.isfile() else None)
         stamp = tag.encode() + b'\n'
         info = tarfile.TarInfo(prefix + 'RELEASE')
