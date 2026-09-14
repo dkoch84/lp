@@ -190,24 +190,27 @@ def audio_command(track_paths, wav_out, ffmpeg='ffmpeg'):
     return cmd
 
 
-def encoder_works(name, ffmpeg='ffmpeg', args=()):
-    """True when ffmpeg can actually encode a frame with ``name`` and ``args``."""
-    key = (ffmpeg, name, tuple(args))
+def encoder_works(name, ffmpeg='ffmpeg', args=(), size=(256, 144)):
+    """True when ffmpeg can actually encode a frame with ``name`` and ``args``
+    at ``size``. The size matters: hardware encoders have a minimum frame
+    size (AMF refuses 160x90 though 256x144 passes)."""
+    key = (ffmpeg, name, tuple(args), tuple(size))
     if key not in _probed:
         r = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi',
-                            '-i', 'color=size=256x144:rate=30', '-frames:v', '2',
+                            '-i', f'color=size={size[0]}x{size[1]}:rate=30', '-frames:v', '2',
                             '-c:v', name, *args, '-f', 'null', '-'],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _probed[key] = r.returncode == 0
     return _probed[key]
 
 
-def pick_encoder(codec='hevc', ffmpeg='ffmpeg'):
-    """(encoder name, its arguments) for ``codec``: the first that works."""
+def pick_encoder(codec='hevc', ffmpeg='ffmpeg', size=(1920, 1080)):
+    """(encoder name, its arguments) for ``codec``: the first that works at
+    ``size``."""
     if codec not in ENCODERS:
         raise ValueError(f'codec must be one of {", ".join(ENCODERS)}, not {codec!r}')
     for name, args in ENCODERS[codec]:
-        if encoder_works(name, ffmpeg, args):
+        if encoder_works(name, ffmpeg, args, size):
             return name, list(args)
     raise RuntimeError(f'ffmpeg has no working {codec} encoder')
 
@@ -387,7 +390,7 @@ def render(plan, out, width=1920, height=1080, fps=30, settings=None, codec='hev
     if width % 2 or height % 2:
         raise ValueError('width and height must be even (yuv420p)')
     settings = settings or VinylSettings(label='art', label_text='none')
-    encoder = pick_encoder(codec, ffmpeg)
+    encoder = pick_encoder(codec, ffmpeg, (width, height))
     paths = [t['path'] for t in plan.tracks]
     started = time.monotonic()
 

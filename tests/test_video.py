@@ -169,9 +169,9 @@ def test_b_frames_are_off_wherever_the_encoder_has_the_knob():
 
 def test_pick_encoder_takes_the_first_that_works(monkeypatch):
     from lp import video
-    monkeypatch.setattr(video, 'encoder_works', lambda name, ffmpeg='ffmpeg', args=(): name == 'libx265')
+    monkeypatch.setattr(video, 'encoder_works', lambda name, *_: name == 'libx265')
     assert video.pick_encoder('hevc')[0] == 'libx265'
-    monkeypatch.setattr(video, 'encoder_works', lambda name, ffmpeg='ffmpeg', args=(): False)
+    monkeypatch.setattr(video, 'encoder_works', lambda name, *_: False)
     with pytest.raises(RuntimeError, match='no working'):
         video.pick_encoder('hevc')
     with pytest.raises(ValueError):
