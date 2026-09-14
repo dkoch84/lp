@@ -10,11 +10,14 @@ config.yml
 dev_out/
 test_records/
 lp/cache/
-# Pre-rendered vinyl caches (mandelbrot/nebula/julia/munafo). Runtime-generated;
-# the munafo snapshots are regenerated from the bongsweat repo. (Note: these are
-# currently untracked — see the prior !lp/cache/munafo negation which never took,
-# since git can't re-include inside an ignored parent.)
-lpcore/cache/
+# The rendered vinyl styles (lpcore/cache/<family>/*.png plus each family's
+# .keys.json) ARE committed: they are what was looked at and shipped, and the
+# release workflow packs them as-is rather than rendering (`make prerender`
+# re-renders only a style whose parameters or renderer changed, and CI fails
+# if one was left stale). Only in-progress renders are ignored.
+lpcore/cache/**/.*.part.png
+lpcore/cache/**/.keys.json.part
+dist/
 .lp_state.json
 .lp_launch.json
 image.png

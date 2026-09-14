@@ -1,0 +1,5 @@
+# Kept out of the release tarball (lp.release runs git archive): README
+# screenshots are not needed to run lp and are most of the checkout's size.
+screenshots/ export-ignore
+image.png export-ignore
+image-1.png export-ignore
