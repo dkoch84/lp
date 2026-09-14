@@ -602,6 +602,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!playSheet.classList.contains('hidden')) settlePlaySheet('cancel');
   if (!queueSheet.classList.contains('hidden')) closeQueueSheet();
+  if (!releaseSheet.classList.contains('hidden')) closeReleaseSheet();
 });
 
 // --- Stop ---
@@ -645,31 +646,52 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// --- Release badge ---
+// --- Release pill and sheet ---
+//
+// The pill in the header names the release that is running; tapping it opens
+// the release sheet: what this is, the notes on GitHub, and on a release
+// install (lp.update: ~/lp/current -> releases/<tag>) the update controls. A
+// git checkout is never managed and gets the sheet without the controls.
+
+const releaseSheet = $('#release-sheet');
+const releaseSheetTitle = $('#release-sheet-title');
+const releaseSheetDescribe = $('#release-sheet-describe');
+const releaseSheetStatus = $('#release-sheet-status');
+const releaseSheetNotes = $('#release-sheet-notes');
+const updateCheck = $('#update-check');
+const updateIdle = $('#update-idle');
+const updateNow = $('#update-now');
+const updateCancel = $('#update-cancel');
+let updateRestarting = false;
+let updateInterval = null;
+let lastUpdate = null;
 
 async function loadVersion() {
   try {
     const v = await api('/api/version');
     brandRelease.textContent = v.title || v.release || '';
-    if (v.describe) brand.title = `lp ${v.describe} — release notes`;
+    releaseSheetTitle.textContent = `lp \u00b7 ${v.title || v.release || ''}`;
+    releaseSheetDescribe.textContent = v.describe && v.describe !== v.release
+      ? v.describe : (v.commit ? `commit ${v.commit}` : '');
   } catch {
     brandRelease.textContent = '';  // leave the lp wordmark, drop the release tag
   }
 }
 
-// --- Updates ---
-//
-// Only a release install (lp.update: ~/lp/current -> releases/<tag>) is
-// "managed"; a git checkout hides the bar entirely. The bar is one line: what
-// is installed, whether something newer exists, and the buttons that apply.
+function openReleaseSheet() {
+  releaseSheet.classList.remove('hidden');
+  loadUpdate();
+}
 
-const updateBar = document.getElementById('update-bar');
-const updateText = document.getElementById('update-text');
-const updateCheck = document.getElementById('update-check');
-const updateIdle = document.getElementById('update-idle');
-const updateNow = document.getElementById('update-now');
-const updateCancel = document.getElementById('update-cancel');
-let updateRestarting = false;
+function closeReleaseSheet() {
+  releaseSheet.classList.add('hidden');
+}
+
+brand.addEventListener('click', openReleaseSheet);
+$('#release-sheet-close').addEventListener('click', closeReleaseSheet);
+$('#release-sheet-backdrop').addEventListener('click', closeReleaseSheet);
+
+// --- Updates ---
 
 function ago(ts) {
   if (!ts) return 'never';
@@ -681,53 +703,69 @@ function ago(ts) {
 }
 
 function renderUpdate(u) {
+  lastUpdate = u;
+  const show = (el, on) => el.classList.toggle('hidden', !on);
+  brandRelease.classList.toggle('update', !!(u && u.managed && u.available));
   if (!u || !u.managed) {
-    updateBar.classList.add('hidden');
+    releaseSheetStatus.textContent = 'This install is a git checkout: it updates with git pull.';
+    releaseSheetStatus.className = '';
+    show(updateCheck, false);
+    show(updateIdle, false);
+    show(updateNow, false);
+    show(updateCancel, false);
     return;
   }
-  updateBar.classList.remove('hidden');
-  updateBar.classList.toggle('available', !!u.available && u.state !== 'error');
-  updateBar.classList.toggle('error', u.state === 'error');
   const busy = u.state === 'checking' || u.state === 'installing';
   updateCheck.disabled = busy;
-  const show = (el, on) => el.classList.toggle('hidden', !on);
+  show(updateCheck, !u.available && !u.pending);
   show(updateIdle, !!u.available && !busy && !u.pending);
   show(updateNow, !!u.available && !busy && u.pending !== 'now');
   show(updateCancel, !!u.pending && u.state !== 'installing');
-  show(updateCheck, !u.available && !u.pending);
+  if (u.url) releaseSheetNotes.href = u.url;
 
-  const current = u.current || 'unknown release';
+  const current = u.current_title || u.current || 'unknown release';
   const latest = u.latest_title || u.latest;
   let text;
+  let cls = '';
   if (u.state === 'installing') {
     const p = u.progress || {};
     const pct = p.total ? ` ${Math.floor(p.done * 100 / p.total)}%` : '';
     text = `${p.phase || 'installing'} ${p.asset || ''}${pct}`.trim();
   } else if (u.state === 'error') {
     text = `Update failed: ${u.error}`;
+    cls = 'error';
   } else if (u.state === 'checking') {
-    text = 'Checking for a new release…';
+    text = 'Checking for a new release\u2026';
   } else if (u.pending === 'idle' && u.installed) {
-    text = `${latest} is ready; restarting after this album`;
+    text = `${latest} is ready and will start after this album.`;
+    cls = 'available';
   } else if (u.pending === 'now' && u.installed) {
-    text = `Restarting into ${latest}…`;
+    text = `Restarting into ${latest}\u2026`;
+    cls = 'available';
   } else if (u.available) {
-    text = `${latest} is out (you have ${current})`;
+    text = `${latest} is out. You have ${current}.`;
+    cls = 'available';
   } else if (u.checked_at) {
-    text = `${current} is the latest release · checked ${ago(u.checked_at)}`;
+    text = `${current} is the latest release. Checked ${ago(u.checked_at)}.`;
   } else {
-    text = `${current} · not checked yet`;
+    text = `${current}. Not checked yet.`;
   }
-  updateText.textContent = text;
+  releaseSheetStatus.textContent = text;
+  releaseSheetStatus.className = cls;
   if (u.pending === 'now' && u.installed) updateRestarting = true;
 }
 
 async function loadUpdate() {
   try {
-    renderUpdate(await api('/api/update'));
+    const u = await api('/api/update');
+    renderUpdate(u);
     updateRestarting = false;
+    // Keep polling only where there is something to poll: a checkout is
+    // never managed and would otherwise ask every few seconds for nothing.
+    // The pill's dot needs it in the background; the sheet needs it live.
+    if (u.managed && !updateInterval) updateInterval = setInterval(loadUpdate, 5000);
   } catch {
-    if (updateRestarting) updateText.textContent = 'Restarting…';
+    if (updateRestarting) releaseSheetStatus.textContent = 'Restarting\u2026';
   }
 }
 
@@ -739,7 +777,8 @@ async function updateAction(path, body) {
       body: body ? JSON.stringify(body) : undefined,
     }));
   } catch (e) {
-    updateText.textContent = `Update request failed (${e.message})`;
+    releaseSheetStatus.textContent = `Update request failed (${e.message})`;
+    releaseSheetStatus.className = 'error';
   }
 }
 

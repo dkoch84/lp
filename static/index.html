@@ -9,11 +9,11 @@
 <body>
   <header>
     <button id="back-btn" class="hidden" aria-label="Back">&larr;</button>
-    <a id="brand" href="https://github.com/dkoch84/lp/releases" target="_blank" rel="noopener" title="Release notes">
+    <button id="brand" title="This release, and updates">
       <img id="brand-icon" src="/release-crucible-and-ruin.png" alt="lp">
       <span id="brand-wordmark">lp</span>
       <span id="brand-release"></span>
-    </a>
+    </button>
     <h1 id="header-title" class="hidden"></h1>
     <div class="header-spacer"></div>
     <button id="share-btn" aria-label="Share screenshot">&#x1F4F7;</button>
@@ -41,16 +41,6 @@
     <div id="album-grid" class="tile-grid view hidden"></div>
   </main>
 
-  <div id="update-bar" class="hidden" role="status">
-    <div id="update-text"></div>
-    <div id="update-actions">
-      <button id="update-check">Check now</button>
-      <button id="update-idle" class="hidden">After this album</button>
-      <button id="update-now" class="hidden">Install now</button>
-      <button id="update-cancel" class="hidden">Don't restart</button>
-    </div>
-  </div>
-
   <footer id="now-playing" class="hidden">
     <div id="np-info">
       <span id="np-track"></span>
@@ -59,6 +49,29 @@
     </div>
     <button id="np-stop">Stop</button>
   </footer>
+
+  <!-- The release pill opens this: what is installed, and updates -->
+  <div id="release-sheet" class="hidden" role="dialog" aria-modal="true">
+    <div id="release-sheet-backdrop"></div>
+    <div id="release-sheet-content">
+      <div id="release-sheet-head">
+        <img id="release-sheet-icon" src="/release-crucible-and-ruin.png" alt="">
+        <div>
+          <div id="release-sheet-title">lp</div>
+          <div id="release-sheet-describe"></div>
+        </div>
+      </div>
+      <div id="release-sheet-status"></div>
+      <div id="release-sheet-buttons">
+        <button id="update-check">Check for a new release</button>
+        <button id="update-now" class="hidden">Install now</button>
+        <button id="update-idle" class="hidden">Install after this album</button>
+        <button id="update-cancel" class="hidden">Don't restart</button>
+        <a id="release-sheet-notes" href="https://github.com/dkoch84/lp/releases" target="_blank" rel="noopener">Release notes on GitHub</a>
+        <button id="release-sheet-close" class="sheet-cancel">Close</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Asked before a tap cuts off the record that is on -->
   <div id="play-sheet" class="hidden" role="dialog" aria-modal="true">

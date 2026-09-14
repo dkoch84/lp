@@ -12,13 +12,14 @@ import os
 import subprocess
 
 # Bumped per release; used when git metadata isn't available at runtime.
-RELEASE_NAME = 'crucible'
+RELEASE_NAME = 'ruin'
 
 # How a release's tag reads in the web UI (tags can't hold spaces or '&').
 RELEASE_TITLES = {
     'karmanjakah': 'Karmanjakah',
     'crucible-and-ruin': 'Crucible & Ruin',
     'crucible': 'Crucible',
+    'ruin': 'Ruin',
 }
 
 _REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

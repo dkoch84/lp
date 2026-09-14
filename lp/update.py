@@ -391,10 +391,17 @@ class UpdateManager:
     def status(self):
         u = self.updater
         latest = u.latest or {}
+        current = u.current_release()
+        try:                                    # the app has lpcore; the bare installer does not
+            from lpcore.version import release_title
+        except ImportError:
+            def release_title(tag):
+                return tag
         return {
             'managed': self.managed,
             'auto': self.auto,
-            'current': u.current_release(),
+            'current': current,
+            'current_title': release_title(current) if current else None,
             'latest': latest.get('tag'),
             'latest_title': latest.get('title'),
             'notes': latest.get('notes'),

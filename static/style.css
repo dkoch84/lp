@@ -416,66 +416,111 @@ main {
   font-size: 0.8rem;
 }
 
-/* Update bar: only on a release install (see lp.update); hidden on a checkout */
-#update-bar {
+/* Release sheet: opened from the brand pill. What is installed, release
+   notes, and (on a release install, see lp.update) the update controls. */
+#release-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+#release-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+#release-sheet-content {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: #161616;
+  border-radius: 10px 10px 0 0;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.6);
+  padding: 18px 18px max(18px, env(safe-area-inset-bottom));
+}
+
+#release-sheet-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  padding: 8px 20px;
-  background: #151515;
-  border-top: 1px solid #2a2a2a;
-  font-size: 0.8rem;
-  color: #999;
+}
+
+#release-sheet-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 
-#update-bar.available {
-  color: #eee;
-  background: #1c2a24;
-  border-top-color: #2f5e48;
+#release-sheet-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
 }
 
-#update-bar.error {
+#release-sheet-describe {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+#release-sheet-status {
+  font-size: 0.9rem;
+  color: #bbb;
+  line-height: 1.45;
+  min-height: 1.3em;
+}
+
+#release-sheet-status.available {
+  color: #8ab89f;
+}
+
+#release-sheet-status.error {
   color: #e8a0a0;
 }
 
-#update-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#update-actions {
+#release-sheet-buttons {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  flex-shrink: 0;
 }
 
-#update-actions button {
-  background: #2a2a2a;
+#release-sheet-buttons button,
+#release-sheet-buttons a {
   border: none;
-  color: #ddd;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 0.8rem;
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 1rem;
+  background: #2a2a2a;
+  color: #eee;
+  text-align: center;
+  text-decoration: none;
   cursor: pointer;
 }
 
-#update-actions button:active {
+#release-sheet-buttons button:active {
   background: #3a3a3a;
 }
 
-#update-actions button:disabled {
+#release-sheet-buttons button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-#update-bar.available #update-now,
-#update-bar.available #update-idle {
-  background: #2f5e48;
+#update-now, #update-idle {
+  background: #2f5e48 !important;
   color: #fff;
+}
+
+#release-sheet-buttons .sheet-cancel {
+  background: none;
+  color: #888;
 }
 
 /* Now playing footer */
@@ -548,6 +593,24 @@ main {
   gap: 9px;
   text-decoration: none;
   color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  position: relative;
+}
+
+/* A dot on the release pill when a newer release is out */
+#brand-release.update::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: #4fbf85;
+  vertical-align: middle;
 }
 
 #brand-icon {
