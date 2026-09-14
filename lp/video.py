@@ -212,6 +212,19 @@ def pick_encoder(codec='hevc', ffmpeg='ffmpeg'):
     raise RuntimeError(f'ffmpeg has no working {codec} encoder')
 
 
+def segment_frames(seconds_list, fps):
+    """Whole-frame lengths for consecutive segments whose boundaries stay
+    within half a frame of the cumulative real times."""
+    frames, total = [], 0
+    acc = 0.0
+    for seconds in seconds_list:
+        acc += seconds
+        n = max(1, round(acc * fps) - total)
+        frames.append(n)
+        total += n
+    return frames
+
+
 def compose_command(width, height, fps, backgrounds, spin, arm, wav, metadata, out,
                     encoder, duration, ffmpeg='ffmpeg'):
     """The one ffmpeg run that makes the video.
@@ -240,11 +253,22 @@ def compose_command(width, height, fps, backgrounds, spin, arm, wav, metadata, o
     cmd += ['-i', wav, '-i', metadata]
     i_spin, i_arm, i_wav, i_meta = n, n + 1, n + 2, n + 3
 
+    # Each segment is cut at a whole number of frames, rounding carried so a
+    # boundary is never more than half a frame from the tagged one. A cut
+    # at a fractional time (track lengths always are) lands the next segment
+    # off the frame grid, and the record overlay then repeats every third
+    # frame for the rest of that track.
     parts = []
-    for i, (_png, seconds) in enumerate(backgrounds):
+    for i, frames in enumerate(segment_frames([sec for _p, sec in backgrounds], fps)):
         parts.append(f'[{i}:v]format=yuv420p,loop=loop=-1:size=1,'
-                     f'trim=duration={seconds:.3f},setpts=PTS-STARTPTS[g{i}]')
-    parts.append(''.join(f'[g{i}]' for i in range(n)) + f'concat=n={n}:v=1:a=0[bg]')
+                     f'trim=end_frame={frames},setpts=PTS-STARTPTS[g{i}]')
+    # settb: concat hands out microsecond timestamps, so 1/fps steps are
+    # rounded, while the spin clip's are exact. From the first segment that
+    # starts on a rounded value the overlay falls a frame behind every third
+    # frame (the record visibly stuttered for all of track 2 and beyond).
+    # An exact 1/fps timebase on the main stream keeps the two in lockstep.
+    parts.append(''.join(f'[g{i}]' for i in range(n))
+                 + f'concat=n={n}:v=1:a=0,settb=1/{fps}[bg]')
     parts.append(f'[{i_arm}:v]format=yuva420p[arm]')
     parts.append(f'[bg][{i_spin}:v]overlay=x={sx}:y={sy}:eof_action=repeat[b1];'
                  f'[b1][arm]overlay=x={ax}:y={ay}:eof_action=repeat,fps={fps},format=yuv420p[v]')

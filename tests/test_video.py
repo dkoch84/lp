@@ -106,8 +106,12 @@ def test_the_graph_loops_stills_once_decoded_and_overlays_only_twice():
     graph = cmd[cmd.index('-filter_complex') + 1]
     assert '-loop' not in cmd, 'image inputs are looped by the filter, not re-decoded per frame'
     assert graph.count('loop=loop=-1:size=1') == 3, 'one per background'
-    assert 'trim=duration=401.000' in graph and 'trim=duration=367.000' in graph
-    assert 'concat=n=3:v=1:a=0[bg]' in graph
+    assert 'trim=end_frame=12030' in graph and 'trim=end_frame=8115' in graph, \
+        'segments are cut on the frame grid (401.0 s = 12030 frames, 270.5 s = 8115)'
+    assert 'trim=duration' not in graph
+    assert 'concat=n=3:v=1:a=0,settb=1/30[bg]' in graph, \
+        'an exact timebase on the main stream, or the spin overlay skips every third frame'
+
     assert graph.count('overlay=') == 2, 'the spin and the arm'
     assert 'overlay=x=1178:y=297' in graph and 'overlay=x=1500:y=300' in graph
     assert graph.count('format=yuv420p') == 4, 'each background up front, and the output'
@@ -115,6 +119,22 @@ def test_the_graph_loops_stills_once_decoded_and_overlays_only_twice():
     assert cmd[cmd.index('-stream_loop') + 1] == '-1', 'the spin clip loops for the whole album'
     assert cmd[cmd.index('-stream_loop') + 2:cmd.index('-stream_loop') + 4] == ['-i', '/t/spin.mp4']
     assert cmd[cmd.index('-t') + 1] == '1033.500'
+
+
+def test_segments_are_whole_frames_with_the_rounding_carried():
+    """Track 1 of Crucible & Ruin is 401.026 s: cut at 401.026 the next
+    segment sat off the frame grid and the record repeated every third
+    frame for all of track 2. Whole-frame cuts keep every boundary within
+    half a frame of the tagged time without the error accumulating."""
+    from lp.video import segment_frames
+    lengths = [401.026, 270.68, 362.014, 168.946, 231.213]
+    frames = segment_frames(lengths, 30)
+    assert frames == [12031, 8120, 10861, 5068, 6936]
+    acc = 0.0
+    for n_total, seconds in zip([sum(frames[:i + 1]) for i in range(len(frames))], lengths):
+        acc += seconds
+        assert abs(n_total / 30 - acc) <= 0.5 / 30 + 1e-9
+    assert segment_frames([0.001], 30) == [1], 'never an empty segment'
 
 
 def test_hevc_output_is_what_youtube_and_apple_players_want():
