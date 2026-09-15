@@ -2,7 +2,7 @@ PY := .venv/bin/python
 RUFF := .venv/bin/ruff
 SRC := lpcore lp lpdeck lpstudio main.py dev_spin.py gen_release_icon.py tests
 
-.PHONY: help check lint test fix run deck shot shot-kiosk gammaray studio prerender video release-assets
+.PHONY: help check lint test fix run deck shot shot-kiosk gammaray studio studio-shot prerender video release-assets
 
 check: lint test          ## lint + tests (run before pushing)
 
@@ -23,6 +23,9 @@ deck:                     ## launch lp-deck (the desktop QML player)
 
 studio:                   ## launch lp-studio (the vinyl-style authoring tool)
 	$(PY) -m lpstudio
+
+studio-shot:              ## headless screenshot of lp-studio → /tmp/lpstudio.png (ARGS=...)
+	$(PY) -m lpstudio.shot /tmp/lpstudio.png $(ARGS)
 
 shot:                     ## headless screenshot of lp-deck → /tmp/lpdeck.png (ARGS=...)
 	$(PY) -m lpdeck.shot /tmp/lpdeck.png --play $(ARGS)

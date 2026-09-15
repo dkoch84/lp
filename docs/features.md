@@ -42,4 +42,8 @@ More in [lpdeck/README.md](../lpdeck/README.md).
 
 - Design vinyl styles with sliders and a live spinning preview.
 - Families: mandelbrot, color, nebula, clouds, smoke, black, clear.
-- Save your work, and export a snippet to add the style to lp.
+- Smoke colours link to the light colour at teal-marble's brightness steps, with warnings when a style will look flat on a big screen.
+- Colour variations: the same smoke turned round the colour wheel, one click to try each.
+- Compare against every shipped style in the family, side by side.
+- Undo and redo for every change, a filter for the controls, dark and light themes.
+- Save your work as a template. Ship a smoke, clouds or nebula style as a style file with its image rendered; export a snippet for mandelbrot and colour styles.

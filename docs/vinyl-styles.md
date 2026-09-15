@@ -9,7 +9,7 @@ Every album gets a random style until you pick one. Pick from the vinyl page in 
 - **Clear**: with platter shimmer and a rainbow sheen.
 - **Album art**: a picture disc of the cover.
 - **Mandelbrot**: 7 zoom spots in 12 colour schemes.
-- **Nebula**: 32 smoke and cloud styles, teal-marble among them.
+- **Nebula**: 46 smoke and cloud styles, among them 15 translucent marbles (teal, purple, pink, crimson, oxblood, copper, amber, mustard, olive, emerald, seafoam, aqua, cobalt, magenta and smoke).
 - **Munafo deep zoom**: three Mandelbrot renders zoomed to `2.7×10⁻²²`. The full-size archives and the GPU engine that made them live in [bongsweat](https://github.com/dkoch84/bongsweat).
 - **Pattern disc**: any Mandelbrot, Nebula or Munafo style as the whole disc.
 
@@ -29,4 +29,12 @@ The grooves mark each track on the album, and the needle follows them as it play
 
 ## The images
 
-The fractal styles are rendered once and committed under `lpcore/cache/` (mandelbrot, nebula, munafo), so nothing is rendered on the kiosk. After changing a style, `make prerender` re-renders just that one; commit the image with the code. New styles are designed in lp-studio (`make studio`).
+The fractal styles are rendered once and committed under `lpcore/cache/` (mandelbrot, nebula, munafo), so nothing is rendered on the kiosk. After changing a style, `make prerender` re-renders just that one; commit the image with the code.
+
+## Making a style
+
+New styles are designed in lp-studio (`make studio`).
+
+- **Smoke colours need a ramp.** A smoke style only reads as smoke on a big screen when its colours step down in brightness: body light, body deep at about 72% of it, smoke ink at about 25%, accent ink at about 9%. With the ramp linked (the default), you pick the light colour and the rest follow. lp-studio warns when a ramp or a render is too flat.
+- **Ship writes a style file.** Smoke, clouds and nebula styles live as JSON in `lpcore/vinyl/styles/nebula/`, one file per style. Ship writes the file and renders its image; commit both. The `order` field sets where the style sits in the catalog (the marbles run round the colour wheel).
+- **Mandelbrot and colour styles** still go into `lpcore/vinyl/catalog.py`: Export gives you the lines to paste.

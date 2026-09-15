@@ -1,15 +1,15 @@
 """Tests for lp-studio's smoke family: the live controls for the layered-smoke
 renderer that teal-marble ships with.
 
-The point: studio is where the look gets tuned, and "Snippet" is how a tuned
-look reaches the kiosk. So the chain has to hold end to end. Every control needs
-a default, the defaults have to reproduce the shipped renderer exactly (so a
-fresh smoke style starts as teal-marble), the style has to route to the right
-renderer, and the snippet has to be valid Python you can paste.
+The point: studio is where the look gets tuned, and shipping a style file is
+how a tuned look reaches the kiosk. So the chain has to hold end to end. Every
+control needs a default, the defaults have to reproduce the shipped renderer
+exactly (so a fresh smoke style starts as teal-marble), the style has to route
+to the right renderer, and the snippet has to be the style file Ship writes.
 
     .venv/bin/python -m pytest tests/test_studio_smoke.py
 """
-import ast
+import json
 import os
 import sys
 
@@ -24,6 +24,7 @@ pytest.importorskip('PySide6', reason='lp-studio needs PySide6 (requirements-dec
 
 import pygame
 
+from lpcore.vinyl import styles as studio_styles
 from lpcore.vinyl.fractals import SMOKE_LAYER_PARAMS, SMOKE_MAX_LAYERS
 from lpstudio import studio
 
@@ -72,17 +73,17 @@ def test_render_vinyl_renders_a_smoke_disc():
     assert blend == 'add'
 
 
-def test_snippet_is_pasteable_python():
+def test_snippet_is_the_style_file_ship_would_write():
     c = studio.StudioController()
     c.setFamily('smoke')
-    c.setName('teal-marble')
+    c.setName('my-marble')
     snippet = c.catalogSnippet()
-    entry = snippet.split("keep the name 'teal-marble':\n", 1)[1].split('\n\n', 1)[0].strip()
-    assert entry.endswith(',')
-    value = ast.literal_eval(entry[:-1])
-    assert value[2] == 'teal-marble'
-    assert value[6] == 'layers'
-    assert value[7] == SMOKE_LAYER_PARAMS
+    assert snippet.startswith('// lpcore/vinyl/styles/nebula/my-marble.json\n')
+    entry = json.loads(snippet.split('\n', 2)[2])
+    assert entry['name'] == 'my-marble' and entry['family'] == 'smoke'
+    # untouched per-layer trims are left out, everything else is pinned
+    params = {k: v for k, v in SMOKE_LAYER_PARAMS.items() if not k.startswith('layer_')}
+    assert studio_styles.to_tuples(entry['params']) == params
 
 
 def test_randomize_changes_only_the_composition():

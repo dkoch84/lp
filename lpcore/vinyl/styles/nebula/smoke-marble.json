@@ -1,0 +1,39 @@
+{
+  "name": "smoke-marble",
+  "family": "smoke",
+  "order": 15,
+  "seed": 222,
+  "params": {
+    "layers": 4,
+    "opacity": 0.39,
+    "amount": 0.43,
+    "gamma": 2.0,
+    "soft": 2,
+    "stretch": [2.0, 2.4],
+    "warp_oct": 5,
+    "arm_oct": 5,
+    "deep_soft": 1,
+    "deep_opacity": 0.5,
+    "veil_soft": 1,
+    "light": [127, 131, 135],
+    "mid": [91, 94, 97],
+    "ink": [31, 33, 34],
+    "opacity_variation": 1.0,
+    "spread": 1.0,
+    "rotate": 0.0,
+    "accents": 3,
+    "accent_seed": 349,
+    "accent_amount": 0.11,
+    "accent_opacity": 1.0,
+    "accent_gamma": 1.6,
+    "accent_soft": 3,
+    "accent_stretch": [2.0, 3.0],
+    "accent_follow": 1.0,
+    "accent_ink": [12, 12, 12],
+    "shadow": 0.0,
+    "shadow_soft": 12
+  },
+  "studio": {
+    "ramp_linked": true
+  }
+}

@@ -14,6 +14,7 @@ import pygame
 from lpcore.vinyl.catalog import (
     JULIA_VARIANTS, MANDELBROT_COLORS, MANDELBROT_VARIANTS, MANDELBROT_ZOOMS,
     MUNAFO_VARIANTS, PRERENDER_SIZE, STYLE_DISTRIBUTION, VINYL_COLORS)
+from lpcore.vinyl import styles
 from lpcore.vinyl.cache import (
     CACHE_DIR, JULIA_CACHE_DIR, MUNAFO_CACHE_DIR, MUNAFO_SOURCE_DIR, NEBULA_CACHE_DIR)
 
@@ -600,6 +601,25 @@ def _nebula_lava_lamp(br, blend, t1, t2, t3, hs):
             g1 * blend + g2 * (1 - blend) + pop * 180,
             b1 * blend + b2 * (1 - blend) + pop * 30)
 
+def _variants_from_files():
+    """NEBULA_VARIANTS entries for the style files lp-studio ships (see
+    lpcore.vinyl.styles), in the tuple shapes the hand-written entries use."""
+    variants = []
+    for entry in styles.load('nebula'):
+        name, seed, p = entry['name'], entry['seed'], styles.to_tuples(entry['params'])
+        if entry['family'] == 'smoke':
+            variants.append((seed, None, name, 1.0, 5, 6, 'layers', p))
+        elif entry['family'] == 'clouds':
+            variants.append((seed, _clouds_palette(p['cloud'], p['sky']), name,
+                             p['saturation'], 6, 7, 'clouds'))
+        else:
+            palette = _nebula_palette(p['col1'], p['col2'], p['amp1'], p['amp2'],
+                                      mods1=p['mods1'], mods2=p['mods2'], sin_freq=p['sin_freq'],
+                                      bright=p['bright'], sparkle=p['sparkle'])
+            variants.append((seed, palette, name, p['saturation'], p['warp'], p['arm']))
+    return variants
+
+
 # Nebula variants: (seed, palette_func, name, saturation, warp_octaves, arm_octaves)
 # Most use standard noise settings; deep_emerald uses reduced warp/arm octaves
 NEBULA_VARIANTS = [
@@ -625,18 +645,11 @@ NEBULA_VARIANTS = [
     (52, _clouds_palette((224, 196, 226), (168, 170, 214)), 'plum-wine',     1.2, 6, 7, 'clouds'),
     (64, _clouds_palette((222, 240, 248), (150, 192, 224)), 'arctic',        1.2, 6, 7, 'clouds'),
     (88, _nebula_marble,         'marble',         1.2, 6, 7),
-    # Tuned in lp-studio's smoke family. Per-layer trims are all at their
-    # no-change defaults, so they are left out.
-    (100, None, 'teal-marble', 1.0, 5, 6, 'layers', dict(
-        layers=4, opacity=0.39, amount=0.43, gamma=2.0, soft=2, stretch=(2.0, 2.4),
-        warp_oct=5, arm_oct=5, deep_soft=1, deep_opacity=0.5, veil_soft=1,
-        light=(68, 150, 140), mid=(48, 112, 104), ink=(16, 40, 34),
-        opacity_variation=1.0, spread=1.0, rotate=0.0,
-        accents=3, accent_seed=349, accent_amount=0.11, accent_opacity=1.0, accent_gamma=1.6,
-        accent_soft=3, accent_stretch=(2.0, 3.0), accent_follow=1.0, accent_ink=(14, 14, 10),
-        shadow=0.0, shadow_soft=12,
-    )),
-    (42, _nebula_galaxy,         'galaxy',         1.6, 6, 7),
+    # Styles made in lp-studio live as data files (lpcore/vinyl/styles/nebula),
+    # in their own `order`: teal-marble, purple-marble, pink-marble, then the
+    # other marbles built from teal's brightness ramp.
+    *_variants_from_files(),
+    (42, _nebula_galaxy,       'galaxy',         1.6, 6, 7),
     (71, _nebula_galaxy_warm,    'galaxy-warm',    1.5, 6, 7),
     (23, _nebula_galaxy_cold,    'galaxy-cold',    1.5, 6, 7),
     (33, _nebula_oil_spill,      'oil-spill',      1.8, 6, 7),

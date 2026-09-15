@@ -494,10 +494,13 @@
 
     // --- Thumbnails ---
 
+    // Previews used to be cached as immutable for a year, so a retuned style
+    // kept its old picture. The server now revalidates them; the r=2 query
+    // leaves those old year-long entries behind. Bump it only if that happens again.
     function previewUrl(id) {
       let s = id.startsWith('pattern-') ? id.slice('pattern-'.length) : id;
       for (const pfx of ['mandelbrot-', 'nebula-', 'munafo-']) {
-        if (s.startsWith(pfx)) return `/api/vinyl/preview/${s.slice(pfx.length)}`;
+        if (s.startsWith(pfx)) return `/api/vinyl/preview/${s.slice(pfx.length)}?r=2`;
       }
       return null;
     }

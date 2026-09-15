@@ -51,7 +51,7 @@ def _wait_for_render(app, item, timeout=60.0):
 def test_render_job_returns_picklable_frames():
     from lpcore.vinyl import fractals
     try:
-        body, grooves, blend, shine = render_job(dict(studio.DEFAULTS), 'smoke', False, 30)
+        body, grooves, blend, shine, stats = render_job(dict(studio.DEFAULTS), 'smoke', False, 30)
     finally:
         # render_job is meant for the worker process and turns the field cache
         # on; run here it would leave the cache on for every later test.
@@ -59,6 +59,19 @@ def test_render_job_returns_picklable_frames():
     for w, h, data in (body, grooves, shine):
         assert (w, h) == (60, 60) and len(data) == 60 * 60 * 4
     assert blend in ('add', 'blend')
+    assert set(stats) == {'p2', 'p25', 'p75', 'p98', 'iqr'} and stats['iqr'] > 0
+
+
+def test_a_finished_render_reports_its_contrast(app):
+    c = studio.StudioController()
+    c.setFamily('smoke')
+    item = MandelPreviewItem()
+    try:
+        item.setController(c)
+        _wait_for_render(app, item)
+        assert c.contrast.get('iqr', 0) > 0
+    finally:
+        item.shutdown()
 
 
 def test_smoke_render_does_not_block_the_event_loop(app):

@@ -25,7 +25,8 @@ from PySide6.QtCore import Property, QCoreApplication, QObject, QRectF, QTimer, 
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtQuick import QQuickPaintedItem
 
-from lpcore.vinyl import fractals
+from lpcore.vinyl import fractals, ramp
+from lpcore.vinyl.catalog import LABEL_RADIUS
 
 from . import studio
 
@@ -52,8 +53,9 @@ def _ensure_pygame():
 
 def render_job(params, family, advanced, radius):
     """Render one preview. Runs in the worker process, so it returns plain
-    picklable data: (w, h, RGBA bytes) for body, grooves and shine, plus the
-    groove blend mode."""
+    picklable data: (w, h, RGBA bytes) for body, grooves and shine, the groove
+    blend mode, and the body's brightness spread (ramp.contrast) outside the
+    label."""
     _ensure_pygame()
     # The worker lives as long as the app, so it can keep noise fields between
     # renders: changing a colour or opacity then skips nearly all the work.
@@ -64,7 +66,9 @@ def render_job(params, family, advanced, radius):
         w, h = surf.get_size()
         return w, h, pygame.image.tobytes(surf, "RGBA")
 
-    return raw(body), raw(grooves), blend, raw(shine)
+    body_raw = raw(body)
+    stats = ramp.contrast(body_raw[2], body_raw[0], body_raw[1], inner=LABEL_RADIUS + 0.03)
+    return body_raw, raw(grooves), blend, raw(shine), stats
 
 
 def _to_qimage(raw):
@@ -76,6 +80,7 @@ class MandelPreviewItem(QQuickPaintedItem):
     controllerChanged = Signal()
     spinningChanged = Signal()
     rendered = Signal()     # a finished render reached the screen (tests wait on it)
+    busyChanged = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -89,6 +94,7 @@ class MandelPreviewItem(QQuickPaintedItem):
         self._pool = None
         self._job = None        # (future, family, radius, started) while rendering
         self._stale = False     # params changed while a render was running
+        self._busy = False
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -144,6 +150,18 @@ class MandelPreviewItem(QQuickPaintedItem):
 
     spinning = Property(bool, getSpinning, setSpinning, notify=spinningChanged)
 
+    # --- busy: a render is running (the window shows a spinner) ---
+
+    def getBusy(self):
+        return self._busy
+
+    def _set_busy(self, on):
+        if on != self._busy:
+            self._busy = on
+            self.busyChanged.emit()
+
+    busy = Property(bool, getBusy, notify=busyChanged)
+
     # --- render ---
 
     def _executor(self):
@@ -171,6 +189,7 @@ class MandelPreviewItem(QQuickPaintedItem):
             self._discard_pool()
             future = self._executor().submit(render_job, params, family, advanced, radius)
         self._job = (future, family, radius, time.monotonic())
+        self._set_busy(True)
         self._poll.start()
 
     def _collect(self):
@@ -180,7 +199,7 @@ class MandelPreviewItem(QQuickPaintedItem):
         self._job = None
         self._poll.stop()
         try:
-            body, grooves, blend, shine = future.result()
+            body, grooves, blend, shine, stats = future.result()
         except BrokenProcessPool:
             self._discard_pool()
             self._controller._set_status("Render worker stopped; restarting it")
@@ -200,11 +219,13 @@ class MandelPreviewItem(QQuickPaintedItem):
             p.end()
             self._disc = disc
             self._shine = _to_qimage(shine)
+            self._controller.setContrast(stats)
             self.update()
             self.rendered.emit()
         if self._stale:
             self._stale = False
             self._render()
+        self._set_busy(self._job is not None)
 
     def shutdown(self):
         """Stop the worker without waiting for a render nobody will see."""

@@ -31,10 +31,13 @@ direction, softness) for every layer.
 import json
 import os
 import random
+import sys
+import time
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, QProcess, Signal, Slot
 
-from lpcore.vinyl import catalog, fractals
+from lpcore.paths import repo_dir
+from lpcore.vinyl import catalog, fractals, ramp, styles
 from lpcore.vinyl.catalog import MANDELBROT_VARIANTS, MANDELBROT_ZOOMS
 from lpcore.vinyl.fractals import (NEBULA_MODS, SMOKE_LAYER_PARAMS, SMOKE_MAX_LAYERS,
                                    _clouds_palette, _nebula_palette)
@@ -327,12 +330,9 @@ def param_spec(family, advanced=False):
 
 # --------------------------------------------------------------------- render
 
-def _nebula_palette_from(p, advanced):
-    """Build the nebula palette closure + structure (warp, arm) from params."""
-    c1 = (p["neb_c1_r"], p["neb_c1_g"], p["neb_c1_b"])
-    c2 = (p["neb_c2_r"], p["neb_c2_g"], p["neb_c2_b"])
-    bright = BRIGHT_MODES[int(p["neb_bright"])]
-    sparkle = SPARKLE_MODES[int(p["neb_sparkle"])]
+def _nebula_args(p, advanced):
+    """The ``_nebula_palette`` arguments, saturation and structure a nebula's
+    params describe (what a nebula style file stores)."""
     if advanced:
         amp1 = (p["amp1_r"], p["amp1_g"], p["amp1_b"])
         amp2 = (p["amp2_r"], p["amp2_g"], p["amp2_b"])
@@ -345,8 +345,22 @@ def _nebula_palette_from(p, advanced):
         amp2 = tuple(k * a for a in DEFAULT_AMP2)
         mods1, mods2 = ("t1", "hs", "sin"), ("t3", "t1", "inv_t3")
         sin_freq, warp, arm = 8.0, 6, 7
-    fn = _nebula_palette(c1, c2, amp1, amp2, mods1, mods2, sin_freq, bright, sparkle)
-    return fn, warp, arm
+    return {
+        "col1": (p["neb_c1_r"], p["neb_c1_g"], p["neb_c1_b"]),
+        "col2": (p["neb_c2_r"], p["neb_c2_g"], p["neb_c2_b"]),
+        "amp1": amp1, "amp2": amp2, "mods1": mods1, "mods2": mods2, "sin_freq": sin_freq,
+        "bright": BRIGHT_MODES[int(p["neb_bright"])],
+        "sparkle": SPARKLE_MODES[int(p["neb_sparkle"])],
+        "saturation": float(p["neb_sat"]), "warp": warp, "arm": arm,
+    }
+
+
+def _nebula_palette_from(p, advanced):
+    """Build the nebula palette closure + structure (warp, arm) from params."""
+    a = _nebula_args(p, advanced)
+    fn = _nebula_palette(a["col1"], a["col2"], a["amp1"], a["amp2"], a["mods1"], a["mods2"],
+                         a["sin_freq"], a["bright"], a["sparkle"])
+    return fn, a["warp"], a["arm"]
 
 
 def _smoke_params(p):
@@ -437,17 +451,158 @@ def render_vinyl(p, family, advanced, size):
         _clear_live()
 
 
+# ------------------------------------------------------- guardrails + style files
+
+# Families lp-studio can ship as a style file (lpcore/vinyl/styles).
+SHIPPABLE = ("smoke", "clouds", "nebula")
+_SEED_KEY = {"smoke": "smk_seed", "clouds": "cld_seed", "nebula": "neb_seed"}
+
+# The params each family owns, so Reset leaves the other families alone.
+_FAMILY_PREFIXES = {
+    "mandelbrot": ("cx", "cy", "zoom", "max_iter", "int_", "r_", "g_", "b_"),
+    "color": ("col_",),
+    "nebula": ("neb_", "amp1_", "amp2_", "mod1_", "mod2_"),
+    "clouds": ("cld_",),
+    "smoke": ("smk_",),
+}
+
+# The smoke colour ramp (see lpcore.vinyl.ramp): the light body colour leads,
+# and while the ramp is linked the three darker colours follow it.
+_RAMP_PREFIX = {"light": "smk_light", "mid": "smk_mid", "ink": "smk_ink",
+                "accent_ink": "smk_acc_ink"}
+_RAMP_LABELS = {"light": "Body (light)", "mid": "Body (deep)", "ink": "Smoke ink",
+                "accent_ink": "Accent ink"}
+_LIGHT_KEYS = {f"smk_light_{c}" for c in "rgb"}
+_DERIVED_KEYS = {f"{_RAMP_PREFIX[k]}_{c}" for k in ramp.RAMP for c in "rgb"}
+
+# A per-layer trim at this value changes nothing (see SMOKE_LAYER_PARAMS).
+_TRIM_UNTOUCHED = {"layer_opacity": 1.0, "layer_amount": 1.0, "layer_stretch": 1.0,
+                   "layer_angle": 0.0, "layer_soft": 0}
+
+_COALESCE_S = 0.4       # changes to one control this close together undo as one step
+_HISTORY_LIMIT = 200
+
+
+def _rgb_of(p, prefix):
+    return tuple(int(p[f"{prefix}_{c}"]) for c in "rgb")
+
+
+def _set_rgb(p, prefix, rgb):
+    for c, v in zip("rgb", rgb):
+        p[f"{prefix}_{c}"] = int(v)
+
+
+def _hex(rgb):
+    return "#{:02x}{:02x}{:02x}".format(*(int(v) for v in rgb))
+
+
+def ramp_colours(p):
+    """{light, mid, ink, accent_ink} RGB tuples from smoke params."""
+    return {k: _rgb_of(p, prefix) for k, prefix in _RAMP_PREFIX.items()}
+
+
+def smoke_style_params(p):
+    """Studio params -> a smoke style file's params: the renderer's keys, with
+    per-layer trims cut to the layers that exist and change something."""
+    out = _smoke_params(p)
+    for key, untouched in _TRIM_UNTOUCHED.items():
+        trims = list(out[key][:out["layers"]])
+        while trims and trims[-1] == untouched:
+            trims.pop()
+        if trims:
+            out[key] = tuple(trims)
+        else:
+            del out[key]
+    return out
+
+
+def studio_from_smoke(params):
+    """A smoke style's renderer params -> studio params (the inverse of _smoke_params)."""
+    P = {**SMOKE_LAYER_PARAMS, **params}
+    s = {
+        "smk_layers": P["layers"], "smk_opacity": P["opacity"], "smk_amount": P["amount"],
+        "smk_gamma": P["gamma"], "smk_soft": P["soft"],
+        "smk_stretch_lo": P["stretch"][0], "smk_stretch_hi": P["stretch"][1],
+        "smk_warp": P["warp_oct"], "smk_arm": P["arm_oct"],
+        "smk_deep_soft": P["deep_soft"], "smk_deep_op": P["deep_opacity"],
+        "smk_veil_soft": P["veil_soft"], "smk_op_var": P["opacity_variation"],
+        "smk_spread": P["spread"], "smk_rotate": P["rotate"],
+        "smk_shadow": P["shadow"], "smk_shadow_soft": P["shadow_soft"],
+        "smk_acc_count": P["accents"], "smk_acc_seed": P["accent_seed"],
+        "smk_acc_amount": P["accent_amount"], "smk_acc_opacity": P["accent_opacity"],
+        "smk_acc_gamma": P["accent_gamma"], "smk_acc_soft": P["accent_soft"],
+        "smk_acc_stretch_lo": P["accent_stretch"][0], "smk_acc_stretch_hi": P["accent_stretch"][1],
+        "smk_acc_follow": P["accent_follow"],
+    }
+    for key, prefix in _RAMP_PREFIX.items():
+        _set_rgb(s, prefix, P[key])
+    for short, long in _LAYER_TRIMS:
+        seq = P[long]
+        for n in range(1, SMOKE_MAX_LAYERS + 1):
+            s[f"smk_l{n}_{short}"] = seq[n - 1] if n <= len(seq) else _TRIM_UNTOUCHED[long]
+    return s
+
+
+def studio_from_clouds(params):
+    s = {"cld_sat": params["saturation"]}
+    _set_rgb(s, "cld_cloud", params["cloud"])
+    _set_rgb(s, "cld_sky", params["sky"])
+    return s
+
+
+def studio_from_nebula(params):
+    """A nebula style's palette arguments -> studio params, in Advanced mode
+    (the only mode that can hold every combination)."""
+    s = {"neb_sat": params["saturation"], "neb_sin_freq": params["sin_freq"],
+         "neb_warp": params["warp"], "neb_arm": params["arm"],
+         "neb_bright": BRIGHT_MODES.index(params["bright"]),
+         "neb_sparkle": SPARKLE_MODES.index(params["sparkle"])}
+    _set_rgb(s, "neb_c1", params["col1"])
+    _set_rgb(s, "neb_c2", params["col2"])
+    for c, a1, a2, m1, m2 in zip("rgb", params["amp1"], params["amp2"],
+                                 params["mods1"], params["mods2"]):
+        s[f"amp1_{c}"], s[f"amp2_{c}"] = int(round(a1)), int(round(a2))
+        s[f"mod1_{c}"], s[f"mod2_{c}"] = NEBULA_MODS.index(m1), NEBULA_MODS.index(m2)
+    return s
+
+
+def style_entry(p, family, advanced, name, order, ramp_linked=False):
+    """The style file lp-studio writes for these params (see lpcore.vinyl.styles)."""
+    if family == "smoke":
+        params = smoke_style_params(p)
+    elif family == "clouds":
+        params = {"cloud": _rgb_of(p, "cld_cloud"), "sky": _rgb_of(p, "cld_sky"),
+                  "saturation": float(p["cld_sat"])}
+    elif family == "nebula":
+        params = _nebula_args(p, advanced)
+    else:
+        raise ValueError(f"{family} styles are not style files")
+    hints = {"effects": effects_from(p), "grooves": grooves_from(p)}
+    if family == "smoke":
+        hints["ramp_linked"] = bool(ramp_linked)
+    return {"name": name, "family": family, "order": order, "seed": int(p[_SEED_KEY[family]]),
+            "params": params, "studio": hints}
+
+
 # ------------------------------------------------------------------ controller
 
 class StudioController(QObject):
+    """Everything QML edits: the family, its params, undo history, the colour
+    ramp guardrails, saved templates and shipping a style file."""
+
     paramsChanged = Signal()
     familyChanged = Signal()
     advancedChanged = Signal()
     nameChanged = Signal()
     statusChanged = Signal()
     hqChanged = Signal()
+    rampLinkedChanged = Signal()
+    guardrailsChanged = Signal()
+    contrastChanged = Signal()
+    historyChanged = Signal()
+    shippingChanged = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, clock=time.monotonic):
         super().__init__(parent)
         self._params = dict(DEFAULTS)
         self._family = "mandelbrot"
@@ -455,6 +610,22 @@ class StudioController(QObject):
         self._name = "untitled"
         self._status = ""
         self._hq = False
+        self._ramp_linked = True
+        self._contrast = None
+        self._guardrails = []
+        self._shipping = False
+        self._process = None
+        self._clock = clock
+        self._history = [self._state()]
+        self._hpos = 0
+        self._last_change = (None, 0.0)
+        self._saved = self._state()
+        self._loaded_ref = None         # the template Save may overwrite without asking
+        self.styles_root = None         # where shipped style files go (tests use a temp dir)
+        self.launch_prerender = self._launch_prerender
+        self.paramsChanged.connect(self._update_guardrails)
+        self.familyChanged.connect(self._update_guardrails)
+        self._update_guardrails()
 
     # --- family + advanced ---
 
@@ -469,6 +640,8 @@ class StudioController(QObject):
         if fam not in FAMILIES or fam == self._family:
             return
         self._family = fam
+        self._set_contrast(None)
+        self._record("family")
         self.familyChanged.emit()
         self.paramsChanged.emit()
 
@@ -481,6 +654,7 @@ class StudioController(QObject):
         on = bool(on)
         if on != self._advanced:
             self._advanced = on
+            self._record("advanced")
             self.advancedChanged.emit()
             self.paramsChanged.emit()
 
@@ -516,10 +690,175 @@ class StudioController(QObject):
         if self._params.get(key) == value:
             return
         self._params[key] = value
+        if self._family == "smoke" and self._ramp_linked:
+            if key in _LIGHT_KEYS:
+                self._apply_ramp()
+            elif key in _DERIVED_KEYS:
+                self._ramp_linked = False
+                self.rampLinkedChanged.emit()
+                self._set_status("Colour ramp unlinked: the darker colours are yours to tune")
+        self._record(key)
+        self.paramsChanged.emit()
+
+    @Slot(str, result=str)
+    def colorOf(self, prefix):
+        """'#rrggbb' of an RGB param triple (``smk_light`` for smk_light_r/g/b)."""
+        return _hex(_rgb_of(self._params, prefix))
+
+    @Slot(str, str)
+    def setColor(self, prefix, hex_color):
+        """Set an RGB param triple from '#rrggbb' as one change (one undo step)."""
+        text = (hex_color or "").strip().lstrip("#")
+        if len(text) != 6:
+            return
+        try:
+            rgb = tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return
+        if _rgb_of(self._params, prefix) == rgb:
+            return
+        _set_rgb(self._params, prefix, rgb)
+        if self._family == "smoke" and self._ramp_linked:
+            if prefix == "smk_light":
+                self._apply_ramp()
+            elif f"{prefix}_r" in _DERIVED_KEYS:
+                self._ramp_linked = False
+                self.rampLinkedChanged.emit()
+        self._record(prefix)
         self.paramsChanged.emit()
 
     def snapshot(self):
         return self._family, dict(self._params), self._advanced
+
+    # --- colour ramp ---
+
+    def _apply_ramp(self):
+        derived = ramp.derive_ramp(_rgb_of(self._params, "smk_light"))
+        for key, rgb in derived.items():
+            _set_rgb(self._params, _RAMP_PREFIX[key], rgb)
+
+    def getRampLinked(self):
+        return self._ramp_linked
+
+    def setRampLinked(self, on):
+        on = bool(on)
+        if on == self._ramp_linked:
+            return
+        self._ramp_linked = on
+        if on and self._family == "smoke":
+            self._apply_ramp()
+            self._set_status("Colour ramp linked: body, smoke and accent colours follow the light colour")
+        self._record("rampLinked")
+        self.rampLinkedChanged.emit()
+        self.paramsChanged.emit()
+
+    rampLinked = Property(bool, getRampLinked, setRampLinked, notify=rampLinkedChanged)
+
+    @Property("QVariantList", notify=guardrailsChanged)
+    def rampSwatches(self):
+        """light / mid / ink / accent: colour, brightness, and the brightness the ramp aims for."""
+        colours = ramp_colours(self._params)
+        light = ramp.luma(colours["light"])
+        return [{"key": k, "prefix": _RAMP_PREFIX[k], "label": _RAMP_LABELS[k],
+                 "color": _hex(rgb), "luma": round(ramp.luma(rgb)),
+                 "target": round(light * ramp.RAMP.get(k, 1.0))}
+                for k, rgb in colours.items()]
+
+    # --- guardrails + contrast ---
+
+    def _update_guardrails(self):
+        issues = []
+        if self._family == "smoke":
+            c = ramp_colours(self._params)
+            issues += ramp.check_ramp(c["light"], c["mid"], c["ink"], c["accent_ink"])
+            issues += ramp.check_contrast(self._contrast)
+        self._guardrails = [i.as_dict() for i in issues]
+        self.guardrailsChanged.emit()
+
+    @Property("QVariantList", notify=guardrailsChanged)
+    def guardrails(self):
+        return self._guardrails
+
+    def _set_contrast(self, stats):
+        self._contrast = stats
+        self.contrastChanged.emit()
+
+    def setContrast(self, stats):
+        """Brightness spread of the latest preview render (from the preview item)."""
+        self._set_contrast(stats)
+        self._update_guardrails()
+
+    @Property("QVariantMap", notify=contrastChanged)
+    def contrast(self):
+        return dict(self._contrast or {})
+
+    # --- undo / redo ---
+
+    def _state(self):
+        return (self._family, self._advanced, self._ramp_linked,
+                tuple(sorted(self._params.items())))
+
+    def _record(self, key=None):
+        state = self._state()
+        if state == self._history[self._hpos]:
+            return
+        now = self._clock()
+        last_key, last_time = self._last_change
+        del self._history[self._hpos + 1:]
+        if key is not None and key == last_key and now - last_time < _COALESCE_S and self._hpos > 0:
+            self._history[self._hpos] = state
+        else:
+            self._history.append(state)
+            del self._history[:-_HISTORY_LIMIT]
+            self._hpos = len(self._history) - 1
+        self._last_change = (key, now)
+        self.historyChanged.emit()
+
+    def _restore(self, state):
+        family, advanced, linked, items = state
+        family_changed = family != self._family
+        advanced_changed = advanced != self._advanced
+        linked_changed = linked != self._ramp_linked
+        self._family, self._advanced, self._ramp_linked = family, advanced, linked
+        self._params = dict(items)
+        self._last_change = (None, 0.0)
+        if family_changed:
+            self._set_contrast(None)
+            self.familyChanged.emit()
+        if advanced_changed:
+            self.advancedChanged.emit()
+        if linked_changed:
+            self.rampLinkedChanged.emit()
+        self.paramsChanged.emit()
+        self.historyChanged.emit()
+
+    @Slot()
+    def undo(self):
+        if self._hpos > 0:
+            self._hpos -= 1
+            self._restore(self._history[self._hpos])
+
+    @Slot()
+    def redo(self):
+        if self._hpos < len(self._history) - 1:
+            self._hpos += 1
+            self._restore(self._history[self._hpos])
+
+    @Property(bool, notify=historyChanged)
+    def canUndo(self):
+        return self._hpos > 0
+
+    @Property(bool, notify=historyChanged)
+    def canRedo(self):
+        return self._hpos < len(self._history) - 1
+
+    @Property(bool, notify=historyChanged)
+    def dirty(self):
+        return self._state() != self._saved
+
+    def _mark_saved(self):
+        self._saved = self._state()
+        self.historyChanged.emit()
 
     # --- name + status ---
 
@@ -562,7 +901,9 @@ class StudioController(QObject):
                     b_base=b_p[0], b_amp=b_p[1], b_freq=b_p[2], b_phase=b_p[3])
                 self.setName(spec)
                 if self._family != "mandelbrot":
-                    self.setFamily("mandelbrot")
+                    self._family = "mandelbrot"
+                    self.familyChanged.emit()
+                self._record("load")
                 self.paramsChanged.emit()
                 self._set_status(f"Loaded variant {spec}")
                 return
@@ -604,19 +945,33 @@ class StudioController(QObject):
             # a new composition only: the look you tuned stays as it is
             self._params["smk_seed"] = random.randint(1, 9999)
             self._set_status(f"New smoke composition, seed {self._params['smk_seed']}")
+        self._record("randomize")
         self.paramsChanged.emit()
 
     @Slot()
     def reset(self):
-        self._params = dict(DEFAULTS)
+        prefixes = _FAMILY_PREFIXES.get(self._family, ())
+        for k, v in DEFAULTS.items():
+            if prefixes and k.startswith(prefixes):
+                self._params[k] = v
+        self._record("reset")
         self.paramsChanged.emit()
-        self._set_status("Reset to defaults")
+        self._set_status(f"Reset {self._family} to its defaults")
 
     # --- save / load local templates ---
 
     def _safe_name(self):
         name = self._name or "untitled"
         return "".join(c if (c.isalnum() or c in "-_") else "-" for c in name)
+
+    def _template_ref(self):
+        return f"{self._family}/{self._safe_name()}"
+
+    @Slot(result=bool)
+    def saveNeedsConfirm(self):
+        """True when Save would replace a template other than the one loaded."""
+        path = os.path.join(TEMPLATE_DIR, f"{self._template_ref()}.json")
+        return os.path.isfile(path) and self._template_ref() != self._loaded_ref
 
     @Slot(result=str)
     def save(self):
@@ -625,8 +980,11 @@ class StudioController(QObject):
         path = os.path.join(fam_dir, f"{self._safe_name()}.json")
         with open(path, "w") as f:
             json.dump({"name": self._name or "untitled", "family": self._family,
-                       "advanced": self._advanced, "params": self._params},
+                       "advanced": self._advanced, "ramp_linked": self._ramp_linked,
+                       "params": self._params},
                       f, indent=2)
+        self._loaded_ref = self._template_ref()
+        self._mark_saved()
         self._set_status(f"Saved {path}")
         return path
 
@@ -653,11 +1011,201 @@ class StudioController(QObject):
         self._params = dict(DEFAULTS)
         # keys from controls that no longer exist (the old shine sliders) are left behind
         self._params.update({k: v for k, v in data.get("params", {}).items() if k in DEFAULTS})
+        linked = data.get("ramp_linked")
+        if linked is None:
+            # saved before the ramp could be linked: linked only if it already follows it
+            c = ramp_colours(self._params)
+            linked = ramp.matches_ramp(c["light"], c["mid"], c["ink"], c["accent_ink"])
+        self._ramp_linked = bool(linked)
         self.setName(data.get("name", ref))
+        self._loaded_ref = ref
+        self._after_load(f"Loaded {ref}")
+
+    @Slot(result="QStringList")
+    def shippedStyles(self):
+        return styles.names(root=self.styles_root)
+
+    @Slot(str)
+    def loadShipped(self, name):
+        entry = next((e for e in styles.load(root=self.styles_root) if e["name"] == name), None)
+        if entry is None:
+            self._set_status(f"No shipped style named {name}")
+            return
+        family, params = entry["family"], styles.to_tuples(entry["params"])
+        hints = entry.get("studio", {})
+        self._params = dict(DEFAULTS)
+        self._params[_SEED_KEY[family]] = entry["seed"]
+        if family == "smoke":
+            self._params.update(studio_from_smoke(params))
+            self._advanced = any(k.startswith("layer_") for k in params)
+            c = ramp_colours(self._params)
+            self._ramp_linked = bool(hints.get("ramp_linked", ramp.matches_ramp(
+                c["light"], c["mid"], c["ink"], c["accent_ink"])))
+        elif family == "clouds":
+            self._params.update(studio_from_clouds(params))
+            self._advanced = False
+        else:
+            self._params.update(studio_from_nebula(params))
+            self._advanced = True
+        for effect in hints.get("effects", []):
+            if effect in catalog.VINYL_EFFECTS:
+                self._params[_effect_key(effect)] = 1
+        treatments = list(catalog.GROOVE_TREATMENTS)
+        if hints.get("grooves") in treatments:
+            self._params["fx_grooves"] = treatments.index(hints["grooves"])
+        self._family = family
+        self.setName(name)
+        self._loaded_ref = None
+        self._after_load(f"Loaded shipped style {name}")
+
+    def _after_load(self, message):
+        self._set_contrast(None)
+        self._record("load")
         self.familyChanged.emit()
         self.advancedChanged.emit()
+        self.rampLinkedChanged.emit()
         self.paramsChanged.emit()
-        self._set_status(f"Loaded {ref}")
+        self._mark_saved()
+        self._set_status(message)
+
+    # --- ship a style file ---
+
+    def _code_style_names(self):
+        """Nebula style names defined in fractals.py itself, which a file must not reuse."""
+        return {v[2] for v in fractals.NEBULA_VARIANTS} - set(styles.names())
+
+    @Slot(str, result="QVariantMap")
+    def shipCheck(self, name):
+        """What shipping under this name would do: {name, supported, valid, exists,
+        builtin, issues, ok}. Guardrail issues are listed but do not block."""
+        name = (name or "").strip()
+        valid = styles.valid_name(name)
+        exists = valid and os.path.isfile(styles.path_for(name, root=self.styles_root))
+        builtin = name in self._code_style_names()
+        supported = self._family in SHIPPABLE
+        return {"name": name, "supported": supported, "valid": valid, "exists": bool(exists),
+                "builtin": builtin, "issues": list(self._guardrails),
+                "ok": supported and valid and not builtin}
+
+    @Slot(str, result=str)
+    def ship(self, name):
+        check = self.shipCheck(name)
+        name = check["name"]
+        if not check["supported"]:
+            self._set_status(f"{self._family.title()} styles can't be shipped as a style file yet")
+            return ""
+        if not check["valid"]:
+            self._set_status("Style names are lowercase words joined by hyphens, like cobalt-marble")
+            return ""
+        if check["builtin"]:
+            self._set_status(f"{name} is already a built-in style; pick another name")
+            return ""
+        existing = {e["name"]: e for e in styles.load(root=self.styles_root)}
+        order = existing[name]["order"] if name in existing else styles.next_order(root=self.styles_root)
+        entry = style_entry(self._params, self._family, self._advanced, name, order,
+                            self._ramp_linked)
+        path = styles.write(entry, root=self.styles_root)
+        self.setName(name)
+        self._set_shipping(True)
+        self._set_status(f"Shipped {name}. Rendering its image (about a minute)...")
+        self.launch_prerender(name)
+        return path
+
+    def _launch_prerender(self, name):
+        proc = QProcess(self)
+        proc.setWorkingDirectory(repo_dir())
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+        proc.finished.connect(lambda code, _status: self._prerender_finished(
+            name, code, bytes(proc.readAll()).decode(errors="replace")))
+        proc.start(sys.executable, ["-m", "lpcore.vinyl.prerender", "--only", name])
+        self._process = proc
+
+    def _prerender_finished(self, name, code, output):
+        self._set_shipping(False)
+        if code == 0:
+            self._set_status(f"{name} is ready. Commit lpcore/vinyl/styles/nebula/{name}.json "
+                             f"and lpcore/cache/nebula/{name}.png")
+        else:
+            lines = [ln for ln in output.strip().splitlines() if ln.strip()]
+            self._set_status(f"Rendering {name} failed: {lines[-1] if lines else f'exit {code}'}")
+
+    def _set_shipping(self, on):
+        if on != self._shipping:
+            self._shipping = on
+            self.shippingChanged.emit()
+
+    @Property(bool, notify=shippingChanged)
+    def shipping(self):
+        return self._shipping
+
+    # --- compare + colour variations ---
+
+    _variation_gen = 0
+    _variations = ()
+
+    @Slot(result="QVariantList")
+    def compareStyles(self):
+        """Rendered images of the catalog styles in this family, for the compare strip."""
+        from PySide6.QtCore import QUrl
+
+        from lpcore.vinyl.cache import CACHE_DIR, NEBULA_CACHE_DIR
+        if self._family == "mandelbrot":
+            items = [(f"{v[4]}-{v[5]}", CACHE_DIR) for v in MANDELBROT_VARIANTS]
+        elif self._family in SHIPPABLE:
+            route = {"layers": "smoke", "clouds": "clouds"}
+            items = [(v[2], NEBULA_CACHE_DIR) for v in fractals.NEBULA_VARIANTS
+                     if route.get(v[6] if len(v) > 6 else None, "nebula") == self._family]
+        else:
+            items = []
+        shipped = set(styles.names())
+        return [{"name": name, "url": QUrl.fromLocalFile(path).toString(), "shipped": name in shipped}
+                for name, folder in items
+                for path in [os.path.join(folder, f"{name}.png")] if os.path.isfile(path)]
+
+    @Slot(int, result="QVariantList")
+    def hueVariations(self, count):
+        """This smoke look turned round the colour wheel: ``count`` light colours at the
+        same brightness and saturation, each with its linked ramp. Thumbnails come from
+        the ``variations`` image provider (lpstudio.variations)."""
+        count = max(1, int(count))
+        light = _rgb_of(self._params, "smk_light")
+        hue, sat = ramp.hue_sat(light)
+        sat = sat if sat >= 0.15 else 0.55      # a grey has no hue to turn
+        lum = ramp.luma(light)
+        base = _smoke_params(self._params)
+        seed = int(self._params["smk_seed"])
+        self._variation_gen += 1
+        self._variations = []
+        out = []
+        for i in range(count):
+            h = (hue + 360.0 * i / count) % 360.0
+            colours = {"light": ramp.at_luma(h, sat, lum)}
+            colours.update(ramp.derive_ramp(colours["light"]))
+            variant = (seed, None, "variation", 1.0, 5, 6, "layers", {**base, **colours})
+            self._variations.append((colours, variant))
+            out.append({"index": i, "hue": round(h), "color": _hex(colours["light"]),
+                        "source": f"image://variations/{self._variation_gen}/{i}"})
+        return out
+
+    def variation_job(self, gen, index):
+        """The variant to render for image://variations/<gen>/<index>, or None if stale."""
+        if gen != self._variation_gen or not 0 <= index < len(self._variations):
+            return None
+        return self._variations[index][1]
+
+    @Slot(int)
+    def applyVariation(self, index):
+        if not 0 <= index < len(self._variations):
+            return
+        colours = self._variations[index][0]
+        for key, rgb in colours.items():
+            _set_rgb(self._params, _RAMP_PREFIX[key], rgb)
+        was_linked, self._ramp_linked = self._ramp_linked, True
+        self._record("variation")
+        if not was_linked:
+            self.rampLinkedChanged.emit()
+        self.paramsChanged.emit()
+        self._set_status(f"Using the {_hex(colours['light'])} variation (Ctrl+Z to go back)")
 
     # --- catalog snippet export ---
 
@@ -672,7 +1220,7 @@ class StudioController(QObject):
                 return (f"({int(p[ch + '_base'])}, {int(p[ch + '_amp'])}, "
                         f"{p[ch + '_freq']:.1f}, {p[ch + '_phase']:.2f})")
             return (
-                "# MANDELBROT_ZOOMS:\n"
+                "# MANDELBROT_ZOOMS (lpcore/vinyl/catalog.py):\n"
                 f"    ({p['cx']:.6g}, {p['cy']:.6g}, {p['zoom']:.6g}, "
                 f"{int(p['max_iter'])}, {name!r}),\n\n"
                 "# MANDELBROT_COLORS: (interior, R, G, B):\n"
@@ -681,46 +1229,16 @@ class StudioController(QObject):
         if fam == "color":
             col = (int(p["col_r"]), int(p["col_g"]), int(p["col_b"]))
             return (
-                "# VINYL_COLORS:\n"
+                "# VINYL_COLORS (lpcore/vinyl/catalog.py):\n"
                 f"    {name!r}: {col},\n")
 
-        if fam == "smoke":
-            return (
-                "# NEBULA_VARIANTS (lpcore/vinyl/fractals.py). To change teal-marble,\n"
-                "# replace its line with this one and keep the name 'teal-marble':\n"
-                f"    ({int(p['smk_seed'])}, None, {name!r}, 1.0, 5, 6, 'layers',\n"
-                f"     {_smoke_params(p)!r}),\n")
-
-        if fam in ("nebula", "clouds"):
-            if fam == "clouds":
-                cloud = (int(p["cld_cloud_r"]), int(p["cld_cloud_g"]), int(p["cld_cloud_b"]))
-                sky = (int(p["cld_sky_r"]), int(p["cld_sky_g"]), int(p["cld_sky_b"]))
-                entry = (f"    ({int(p['cld_seed'])}, _clouds_palette({cloud}, {sky}), "
-                         f"{name!r}, {p['cld_sat']:.2f}, 6, 7, 'clouds'),")
-            else:
-                c1 = (int(p["neb_c1_r"]), int(p["neb_c1_g"]), int(p["neb_c1_b"]))
-                c2 = (int(p["neb_c2_r"]), int(p["neb_c2_g"]), int(p["neb_c2_b"]))
-                fn, warp, arm = _nebula_palette_from(p, self._advanced)
-                amp1 = (tuple(round(a) for a in (p["amp1_r"], p["amp1_g"], p["amp1_b"]))
-                        if self._advanced
-                        else tuple(round(p["neb_contrast"] * a) for a in DEFAULT_AMP1))
-                amp2 = (tuple(round(a) for a in (p["amp2_r"], p["amp2_g"], p["amp2_b"]))
-                        if self._advanced
-                        else tuple(round(p["neb_contrast"] * a) for a in DEFAULT_AMP2))
-                mods1 = (tuple(NEBULA_MODS[int(p[f"mod1_{c}"])] for c in "rgb")
-                         if self._advanced else ("t1", "hs", "sin"))
-                mods2 = (tuple(NEBULA_MODS[int(p[f"mod2_{c}"])] for c in "rgb")
-                         if self._advanced else ("t3", "t1", "inv_t3"))
-                freq = p["neb_sin_freq"] if self._advanced else 8.0
-                entry = (
-                    f"    ({int(p['neb_seed'])}, _nebula_palette({c1}, {c2}, {amp1}, {amp2},\n"
-                    f"        mods1={mods1}, mods2={mods2}, sin_freq={freq:.1f}, "
-                    f"bright={BRIGHT_MODES[int(p['neb_bright'])]!r}, "
-                    f"sparkle={SPARKLE_MODES[int(p['neb_sparkle'])]!r}),\n"
-                    f"     {name!r}, {p['neb_sat']:.2f}, {warp}, {arm}),")
-            return (
-                "# NEBULA_VARIANTS (lpcore/vinyl/fractals.py):\n"
-                f"{entry}\n")
+        if fam in SHIPPABLE:
+            file_name = name if styles.valid_name(name) else "your-style-name"
+            entry = style_entry(p, fam, self._advanced, file_name,
+                                styles.next_order(root=self.styles_root), self._ramp_linked)
+            return (f"// lpcore/vinyl/styles/nebula/{file_name}.json\n"
+                    f"// Ship writes this file and renders its image for you.\n"
+                    + styles.dumps(entry))
 
         return (f"# '{fam}' is a built-in style with no catalog entry to add.\n"
                 f"# Nothing to export.\n")

@@ -21,24 +21,25 @@ pytest.importorskip('PySide6', reason='lp-studio needs PySide6 (requirements-dec
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 from PySide6.QtTest import QTest
 
 from lpstudio import studio
-from lpstudio.__main__ import QML_DIR
+from lpstudio.__main__ import build_engine
 from lpstudio.preview_item import MandelPreviewItem
 
 
 @pytest.fixture(scope='module')
-def ui():
+def ui(tmp_path_factory):
     app = QGuiApplication.instance() or QGuiApplication([])
-    qmlRegisterType(MandelPreviewItem, 'Lpstudio', 1, 0, 'MandelPreviewItem')
     controller = studio.StudioController()
     controller.setFamily('smoke')
-    engine = QQmlApplicationEngine()
-    engine.rootContext().setContextProperty('studio', controller)
-    engine.load(os.path.join(QML_DIR, 'Studio.qml'))
+    settings = tmp_path_factory.mktemp('studio-settings') / 'studio.ini'
+    engine = build_engine(controller, settings_file=str(settings))
     win = engine.rootObjects()[0]
+    app.processEvents()
+    # colours show as a swatch; their channel boxes are one click away
+    next(i for i in _items(win.contentItem())
+         if i.objectName() == 'channels_smk_acc_ink').setProperty('checked', True)
     app.processEvents()
     yield app, win, controller
     for item in win.findChildren(MandelPreviewItem):

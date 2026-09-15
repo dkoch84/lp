@@ -1,7 +1,7 @@
 import os
 import threading
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -450,15 +450,19 @@ def create_app(player, library, static_dir, scrobbler=None, display=None,
         return {"id": style_id, "favorite": req.favorite}
 
     @app.get("/api/vinyl/preview/{style:path}")
-    def vinyl_preview(style: str):
+    def vinyl_preview(style: str, request: Request):
         from lpcore.vinyl.cache import (CACHE_DIR, NEBULA_CACHE_DIR, JULIA_CACHE_DIR,
                                         MUNAFO_CACHE_DIR)
-        # Vinyl previews are content-addressable by style id and effectively
-        # never change once cached, so let the browser hold onto them for a
-        # year. New variants get new ids; cached previews are stable.
-        headers = {'Cache-Control': 'public, max-age=31536000, immutable'}
-
+        # A style keeps its id when it is retuned (purple-marble was), so a
+        # preview must not be cached as immutable: the browser kept the old
+        # image for a year. Instead it revalidates every time, and an unchanged
+        # image costs a 304 with no body. The ETag follows the file's mtime and
+        # size, which change whenever an update or prerender replaces it.
         def _serve(path):
+            st = os.stat(path)
+            headers = {'Cache-Control': 'no-cache', 'ETag': f'"{st.st_mtime_ns:x}-{st.st_size:x}"'}
+            if request.headers.get('if-none-match') == headers['ETag']:
+                return Response(status_code=304, headers=headers)
             return FileResponse(path, media_type='image/png', headers=headers)
 
         # Julia previews come in as "julia-dendrite" etc — strip the prefix.

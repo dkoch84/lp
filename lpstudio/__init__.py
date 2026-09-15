@@ -1,13 +1,14 @@
-"""lp-studio — the vinyl-style authoring tool (PySide6) built on lpcore.
+"""lp-studio: the vinyl-style authoring tool (PySide6) built on lpcore.
 
-A designer's bench for *creating new catalog styles*: tune a fractal's zoom
-location and sinusoidal colour palette with live preview, then export the
-result either as a local JSON template or as a paste-ready snippet for
-``lpcore/vinyl/catalog.py``. Shares lpcore's exact production renderer with the
-lp kiosk and lp-deck, so what you see here is what the real vinyl will look
-like.
+A bench for making new catalog styles. Tune a mandelbrot, colour, nebula,
+clouds or layered-smoke style against a live preview drawn by lpcore's exact
+production renderer, so what you see is what the kiosk and lp-deck will draw.
 
-MVP scope: the Mandelbrot style family (the most parametric, fully
-self-contained look). Nebula/munafo authoring can follow the same pattern.
+For smoke, the darker colours can follow the light one at teal-marble's
+brightness steps (lpcore.vinyl.ramp), and the window warns about a ramp or a
+render that will look flat on a big screen. Every change can be undone. A
+finished smoke, clouds or nebula style ships as a style file
+(lpcore.vinyl.styles) with its image rendered; mandelbrot and colour styles
+export a snippet for lpcore/vinyl/catalog.py.
 """
-__version__ = "0.0.1-dev"
+__version__ = "0.1.0-dev"

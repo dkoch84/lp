@@ -1,0 +1,39 @@
+{
+  "name": "aqua-marble",
+  "family": "smoke",
+  "order": 11,
+  "seed": 219,
+  "params": {
+    "layers": 4,
+    "opacity": 0.39,
+    "amount": 0.43,
+    "gamma": 2.0,
+    "soft": 2,
+    "stretch": [2.0, 2.4],
+    "warp_oct": 5,
+    "arm_oct": 5,
+    "deep_soft": 1,
+    "deep_opacity": 0.5,
+    "veil_soft": 1,
+    "light": [79, 164, 177],
+    "mid": [53, 120, 130],
+    "ink": [15, 43, 47],
+    "opacity_variation": 1.0,
+    "spread": 1.0,
+    "rotate": 0.0,
+    "accents": 3,
+    "accent_seed": 349,
+    "accent_amount": 0.11,
+    "accent_opacity": 1.0,
+    "accent_gamma": 1.6,
+    "accent_soft": 3,
+    "accent_stretch": [2.0, 3.0],
+    "accent_follow": 1.0,
+    "accent_ink": [10, 14, 14],
+    "shadow": 0.0,
+    "shadow_soft": 12
+  },
+  "studio": {
+    "ramp_linked": true
+  }
+}

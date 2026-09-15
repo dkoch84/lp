@@ -9,6 +9,7 @@ import QtQuick.Layouts
 ColumnLayout {
     id: root
     required property var spec
+    property QtObject theme
     spacing: 2
 
     readonly property bool isSlider: spec.kind === "slider"
@@ -31,8 +32,9 @@ ColumnLayout {
         Layout.fillWidth: true
         Label {
             text: root.spec.label
-            color: "#bdbdbd"
+            color: root.theme.textDim
             font.pixelSize: 12
+            elide: Text.ElideRight
             Layout.fillWidth: true
         }
         // The slider's value, typed exactly: Enter (or clicking away) applies it,
@@ -43,18 +45,18 @@ ColumnLayout {
             visible: root.isSlider
             Layout.preferredWidth: 70
             horizontalAlignment: Text.AlignRight
-            color: "#e6e6e6"
+            color: root.theme.text
             font.pixelSize: 12
-            font.family: "monospace"
+            font.family: root.theme.mono
             selectByMouse: true
             topPadding: 2
             bottomPadding: 2
             leftPadding: 4
             rightPadding: 4
             background: Rectangle {
-                color: valueBox.activeFocus ? "#262626" : "transparent"
-                border.color: valueBox.activeFocus ? "#6ea8ff" : "#333333"
-                radius: 3
+                color: valueBox.activeFocus ? root.theme.surface : "transparent"
+                border.color: valueBox.activeFocus ? root.theme.accent : root.theme.line
+                radius: 4
             }
 
             function commit(v) {
@@ -72,27 +74,18 @@ ColumnLayout {
         }
     }
 
-    // Toggle variant (e.g. additive vs. normal-blend grooves)
     CheckBox {
         id: toggle
         visible: root.isToggle
         text: root.spec.label
         checked: studio.param(root.spec.key) >= 0.5
         onToggled: studio.setParam(root.spec.key, checked ? 1 : 0)
-        contentItem: Label {
-            text: toggle.text
-            color: "#bdbdbd"
-            font.pixelSize: 12
-            leftPadding: toggle.indicator.width + 6
-            verticalAlignment: Text.AlignVCenter
-        }
         Connections {
             target: studio
             function onParamsChanged() { toggle.checked = studio.param(root.spec.key) >= 0.5 }
         }
     }
 
-    // Slider variant (colour params)
     Slider {
         id: slider
         visible: root.isSlider
@@ -109,7 +102,7 @@ ColumnLayout {
         }
     }
 
-    // Choice variant (enum dropdown — value is the option index)
+    // Choice: an enum dropdown whose value is the option index
     ComboBox {
         id: choice
         visible: root.isChoice
@@ -123,21 +116,22 @@ ColumnLayout {
         }
     }
 
-    // Field variant (location params — need precision a slider can't give)
+    // Field: location params that need more precision than a slider gives
     TextField {
         id: field
         visible: !root.isSlider && !root.isChoice && !root.isToggle
         Layout.fillWidth: true
-        color: "#e6e6e6"
+        font.family: root.theme.mono
         text: root.fmt(studio.param(root.spec.key))
-        background: Rectangle { color: "#262626"; border.color: "#333333"; radius: 4 }
+        selectByMouse: true
         onEditingFinished: {
             var v = parseFloat(text)
             if (!isNaN(v)) studio.setParam(root.spec.key, v)
+            text = root.fmt(studio.param(root.spec.key))
         }
         Connections {
             target: studio
-            function onParamsChanged() { field.text = root.fmt(studio.param(root.spec.key)) }
+            function onParamsChanged() { if (!field.activeFocus) field.text = root.fmt(studio.param(root.spec.key)) }
         }
     }
 }
